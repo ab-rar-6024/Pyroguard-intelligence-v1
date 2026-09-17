@@ -1,27 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  BrainCircuit, 
-  ShieldAlert, 
-  Radio, 
-  Wind, 
-  CheckSquare, 
-  Square, 
-  Loader2, 
-  Flame, 
+import {
+  X,
+  BrainCircuit,
+  ShieldAlert,
+  Radio,
+  Wind,
+  CheckSquare,
+  Square,
+  Loader2,
+  Flame,
   AlertTriangle,
   FileCheck,
   Truck,
-  Sparkles,
-  Globe2,
-  Cpu,
   Send,
-  RefreshCw,
-  Key,
-  Layers,
-  ChevronDown
+  RefreshCw
 } from 'lucide-react';
-import { ThermalAnomaly, IndustrialFacility, AIProvider, AIThreatAnalysisReport } from '../types';
+import { ThermalAnomaly, IndustrialFacility, AIThreatAnalysisReport } from '../types';
 
 interface AIThreatIntelligenceModalProps {
   anomaly: ThermalAnomaly;
@@ -30,73 +24,16 @@ interface AIThreatIntelligenceModalProps {
   onTriggerDispatch: (anomaly: ThermalAnomaly, facility: IndustrialFacility, customMessage?: string) => void;
 }
 
-const PROVIDERS: {
-  id: AIProvider;
-  name: string;
-  badge: string;
-  badgeColor: string;
-  icon: any;
-  models: { id: string; label: string; isFree?: boolean }[];
-  description: string;
-}[] = [
-  {
-    id: 'gemini',
-    name: 'Google Gemini API',
-    badge: 'OFFICIAL',
-    badgeColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-    icon: Sparkles,
-    models: [
-      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Ultra Reliable)' },
-      { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Latest)' },
-      { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite (High Speed)' },
-    ],
-    description: 'Server-side high-throughput reasoning with real-time chemical hazard assessment.'
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter Free Tier',
-    badge: 'FREE MODELS',
-    badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    icon: Globe2,
-    models: [
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Meta Llama 3.3 70B (Free)', isFree: true },
-      { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (Free)', isFree: true },
-      { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B Instruct (Free)', isFree: true },
-      { id: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B IT (Free)', isFree: true },
-    ],
-    description: 'Community and open-source models with free tier access.'
-  },
-  {
-    id: 'huggingface',
-    name: 'Hugging Face Inference',
-    badge: 'FREE TIER',
-    badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    icon: Cpu,
-    models: [
-      { id: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen 2.5 72B Instruct (Free)', isFree: true },
-      { id: 'meta-llama/Llama-3.2-3B-Instruct', label: 'Llama 3.2 3B Instruct (Free)', isFree: true },
-      { id: 'mistralai/Mistral-7B-Instruct-v0.3', label: 'Mistral 7B v0.3 (Free)', isFree: true },
-    ],
-    description: 'Hugging Face serverless inference pipeline for open LLMs.'
-  }
-];
-
 export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps> = ({
   anomaly,
   facility,
   onClose,
   onTriggerDispatch,
 }) => {
-  // Provider state
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('gemini');
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.8-flash');
-  const [customKey, setCustomKey] = useState<string>('');
-  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
-
   // Analysis State
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<AIThreatAnalysisReport | null>(null);
-  const [reportSource, setReportSource] = useState<string>('Connecting to AI Engine...');
+  const [reportSource, setReportSource] = useState<string>('AI Tactical Engine');
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
   const [evacRadius, setEvacRadius] = useState<number>(facility.blastRadiusKm + 1.5);
   const [customNotes, setCustomNotes] = useState('');
@@ -105,15 +42,6 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'ai'; text: string; time: string }>>([]);
   const [inputQuestion, setInputQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-
-  // Update selected model when provider switches
-  const handleProviderChange = (prov: AIProvider) => {
-    setSelectedProvider(prov);
-    const target = PROVIDERS.find((p) => p.id === prov);
-    if (target && target.models.length > 0) {
-      setSelectedModel(target.models[0].id);
-    }
-  };
 
   const fetchAIAnalysis = async () => {
     setLoading(true);
@@ -130,16 +58,14 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
           windSpeedKmh: anomaly.windSpeedKmh,
           windDirectionDeg: anomaly.windDirectionDeg,
           blastRadiusKm: facility.blastRadiusKm,
-          provider: selectedProvider,
-          model: selectedModel,
-          customApiKey: customKey || undefined,
+          provider: 'groq',
         }),
       });
 
       const data = await res.json();
       if (data.success && data.report) {
         setReport(data.report);
-        setReportSource(data.source || `${selectedProvider.toUpperCase()} AI`);
+        setReportSource(data.source || 'AI Intelligence Engine');
       }
     } catch (e) {
       console.error('Failed to load AI situation analysis:', e);
@@ -150,7 +76,7 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
 
   useEffect(() => {
     fetchAIAnalysis();
-  }, [anomaly, facility, selectedProvider, selectedModel]);
+  }, [anomaly, facility]);
 
   const handleSendChat = async (questionText?: string) => {
     const q = questionText || inputQuestion;
@@ -177,9 +103,7 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
             windSpeedKmh: anomaly.windSpeedKmh,
             windDirectionDeg: anomaly.windDirectionDeg,
           },
-          provider: selectedProvider,
-          model: selectedModel,
-          customApiKey: customKey || undefined,
+          provider: 'groq',
         }),
       });
 
@@ -208,6 +132,98 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
     setCheckedItems((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
+  // Lightweight markdown renderer — handles bold, headers, bullets, tables, dividers
+  const renderMarkdown = (text: string) => {
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+
+    const renderInline = (line: string, key: number): React.ReactNode => {
+      // Process inline bold: **text**
+      const parts = line.split(/\*\*(.*?)\*\*/g);
+      return (
+        <span key={key}>
+          {parts.map((part, i) =>
+            i % 2 === 1 ? <strong key={i} className="font-bold text-white">{part}</strong> : part
+          )}
+        </span>
+      );
+    };
+
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+
+      // Horizontal rule
+      if (trimmed === '---' || trimmed === '***') {
+        elements.push(<hr key={i} className="border-slate-700 my-1.5" />);
+      }
+      // ### Header
+      else if (trimmed.startsWith('### ')) {
+        elements.push(
+          <p key={i} className="font-bold text-orange-400 text-[11px] mt-2 mb-0.5 uppercase tracking-wide">
+            {renderInline(trimmed.replace(/^###\s+/, ''), i)}
+          </p>
+        );
+      }
+      // ## Header
+      else if (trimmed.startsWith('## ')) {
+        elements.push(
+          <p key={i} className="font-bold text-orange-300 text-xs mt-2 mb-0.5">
+            {renderInline(trimmed.replace(/^##\s+/, ''), i)}
+          </p>
+        );
+      }
+      // Table row (| col | col |)
+      else if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const cells = trimmed.slice(1, -1).split('|').map(c => c.trim());
+        // Skip separator rows (|---|---|)
+        if (cells.some(c => /^[-:]+$/.test(c))) return;
+        const isHeader = i > 0 && lines[i - 1]?.trim().startsWith('|') && (lines[i + 1]?.trim() || '').replace(/[| :-]/g, '') === '';
+        elements.push(
+          <div key={i} className="flex gap-2 text-[10px] border-b border-slate-800 py-0.5">
+            {cells.map((cell, ci) => (
+              <span key={ci} className={`flex-1 ${isHeader ? 'font-bold text-slate-300' : 'text-slate-400'}`}>
+                {renderInline(cell, ci)}
+              </span>
+            ))}
+          </div>
+        );
+      }
+      // Bullet point: starts with • or - or *
+      else if (/^[•\-\*]\s/.test(trimmed)) {
+        elements.push(
+          <div key={i} className="flex gap-1.5 text-[11px] leading-relaxed">
+            <span className="text-orange-400 flex-shrink-0 mt-px">•</span>
+            <span className="text-slate-300">{renderInline(trimmed.replace(/^[•\-\*]\s+/, ''), i)}</span>
+          </div>
+        );
+      }
+      // Numbered list
+      else if (/^\d+\.\s/.test(trimmed)) {
+        const num = trimmed.match(/^(\d+)\./)![1];
+        elements.push(
+          <div key={i} className="flex gap-1.5 text-[11px] leading-relaxed">
+            <span className="text-orange-400 flex-shrink-0 font-bold min-w-[14px]">{num}.</span>
+            <span className="text-slate-300">{renderInline(trimmed.replace(/^\d+\.\s+/, ''), i)}</span>
+          </div>
+        );
+      }
+      // Empty line → small spacer
+      else if (trimmed === '') {
+        elements.push(<div key={i} className="h-1" />);
+      }
+      // Normal paragraph line
+      else {
+        elements.push(
+          <p key={i} className="text-[11px] leading-relaxed text-slate-300">
+            {renderInline(trimmed, i)}
+          </p>
+        );
+      }
+    });
+
+    return <div className="space-y-0.5">{elements}</div>;
+  };
+
   const handleDispatch = () => {
     const msg = customNotes
       ? `TACTICAL AI DISPATCH: ${customNotes}`
@@ -215,8 +231,6 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
     onTriggerDispatch(anomaly, facility, msg);
     onClose();
   };
-
-  const activeProviderObj = PROVIDERS.find((p) => p.id === selectedProvider);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-xl">
@@ -242,95 +256,22 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-orange-400 hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* AI Provider & Free Models Selector Bar */}
-        <div className="px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-900/80 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-          
-          {/* Provider Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800 w-full sm:w-auto pb-1 sm:pb-0">
-            <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider mr-1 flex-shrink-0">AI:</span>
-            {PROVIDERS.map((prov) => {
-              const IconComp = prov.icon;
-              const isActive = selectedProvider === prov.id;
-              return (
-                <button
-                  key={prov.id}
-                  onClick={() => handleProviderChange(prov.id)}
-                  className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border text-[11px] sm:text-xs transition-all cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'bg-slate-800 border-orange-500/60 text-white font-bold shadow-sm'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  <IconComp className={`w-3.5 h-3.5 ${isActive ? 'text-orange-400' : 'text-slate-400'}`} />
-                  <span>{prov.name}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Model Selector & Key Drawer Toggle */}
-          <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            <div className="relative flex-1 sm:flex-initial">
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full sm:w-auto bg-slate-950 border border-slate-700/80 text-slate-200 text-[11px] sm:text-xs rounded-lg px-2.5 py-1.5 pr-7 appearance-none focus:outline-none focus:border-orange-500 font-mono cursor-pointer"
-              >
-                {activeProviderObj?.models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
-
-            {selectedProvider !== 'gemini' && (
-              <button
-                onClick={() => setShowKeyInput(!showKeyInput)}
-                title="Optional custom API Key"
-                className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                  showKeyInput || customKey
-                    ? 'bg-slate-800 border-cyan-500/50 text-cyan-400'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Key className="w-3.5 h-3.5" />
-              </button>
-            )}
-
+          <div className="flex items-center gap-2">
             <button
               onClick={fetchAIAnalysis}
               title="Regenerate Tactical Analysis"
               className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-orange-400 transition-colors cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-400' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-orange-400' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-orange-400 hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
-
-        {/* Optional Custom Key Sub-bar */}
-        {showKeyInput && selectedProvider !== 'gemini' && (
-          <div className="px-3 sm:px-4 py-2 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 sm:gap-2 text-xs">
-            <span className="text-slate-400 text-[11px]">Custom {selectedProvider === 'openrouter' ? 'OpenRouter' : 'Hugging Face'} Key:</span>
-            <input
-              type="password"
-              value={customKey}
-              onChange={(e) => setCustomKey(e.target.value)}
-              placeholder={selectedProvider === 'openrouter' ? 'sk-or-v1-...' : 'hf_...'}
-              className="w-full sm:flex-1 sm:max-w-sm bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
-            />
-            <span className="text-[10px] text-slate-500">Leave blank for free routing</span>
-          </div>
-        )}
 
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
@@ -365,7 +306,7 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
             <div className="py-12 flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-8 h-8 text-orange-400 animate-spin" />
               <div className="text-sm text-slate-300 font-bold text-center">
-                Synthesizing hazard intelligence via {activeProviderObj?.name}...
+                Synthesizing real-time hazard intelligence & mitigation directives...
               </div>
               <p className="text-xs text-slate-400 text-center max-w-md">
                 Running computational dispersion, apparatus sizing, and structural ignition models
@@ -381,7 +322,7 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
                     <AlertTriangle className="w-4 h-4" /> Strategic Assessment
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    Provider: <strong className="text-slate-300">{reportSource}</strong>
+                    Intelligence Engine: <strong className="text-slate-300">{reportSource}</strong>
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed">
@@ -468,7 +409,7 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
                   <div className="text-xs font-bold text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
                     <BrainCircuit className="w-4 h-4 text-orange-400" /> Tactical Co-Pilot Inquiry
                   </div>
-                  <span className="text-[10px] text-slate-400">Ask safety questions to {selectedModel}</span>
+                  <span className="text-[10px] text-slate-400">Instant AI Hazard Assessment & Strategy</span>
                 </div>
 
                 {/* Quick chip queries */}
@@ -491,21 +432,25 @@ export const AIThreatIntelligenceModal: React.FC<AIThreatIntelligenceModalProps>
 
                 {/* Conversation History */}
                 {chatMessages.length > 0 && (
-                  <div className="space-y-2 max-h-48 overflow-y-auto p-2 bg-slate-950/80 rounded-lg border border-slate-800 text-xs">
+                  <div className="space-y-2 max-h-64 overflow-y-auto p-2 bg-slate-950/80 rounded-lg border border-slate-800">
                     {chatMessages.map((msg, i) => (
                       <div
                         key={i}
-                        className={`p-2 rounded-lg ${
+                        className={`p-2.5 rounded-lg ${
                           msg.role === 'user'
-                            ? 'bg-slate-800/80 text-slate-200 ml-4'
-                            : 'bg-orange-950/30 border border-orange-500/20 text-slate-200 mr-4'
+                            ? 'bg-slate-800/80 ml-4'
+                            : 'bg-orange-950/20 border border-orange-500/20 mr-2'
                         }`}
                       >
-                        <div className="text-[9px] text-slate-400 mb-0.5 flex justify-between">
-                          <span>{msg.role === 'user' ? 'Operator Inquiry' : `${selectedModel} Advisor`}</span>
+                        <div className="text-[9px] text-slate-400 mb-1 flex justify-between">
+                          <span className="font-bold">{msg.role === 'user' ? 'Operator Inquiry' : 'Tactical AI Co-Pilot'}</span>
                           <span>{msg.time}</span>
                         </div>
-                        <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                        {msg.role === 'user' ? (
+                          <p className="text-[11px] text-slate-200 leading-relaxed">{msg.text}</p>
+                        ) : (
+                          renderMarkdown(msg.text)
+                        )}
                       </div>
                     ))}
                   </div>

@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "framework": null,
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/server.js" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
