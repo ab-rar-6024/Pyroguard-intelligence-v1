@@ -4,19 +4,18 @@ import {
   AlertTriangle,
   ShieldAlert,
   Radio,
-  Volume2,
-  VolumeX,
   Settings,
   Download,
   Layers,
   Activity,
   Zap,
   Search,
-  Satellite,
   RefreshCw,
   X,
   Sun,
-  Moon
+  Moon,
+  History,
+  MapPinPlus
 } from 'lucide-react';
 import { ThermalAnomaly, EmergencyAlert, FIRMSFeedStatus, AppTheme } from '../types';
 
@@ -28,13 +27,13 @@ interface HeaderHUDProps {
   firmsStatus?: FIRMSFeedStatus | null;
   isRefreshingSatellites?: boolean;
   onRefreshSatellites?: () => void;
-  soundEnabled: boolean;
-  onToggleSound: () => void;
   onOpenThresholds: () => void;
   onOpenExport: () => void;
   onOpenFastAPI?: () => void;
   onOpenWidgets: () => void;
   onOpenIndiaCommand?: () => void;
+  onOpenIncidentHistory: () => void;
+  onOpenReportSighting: () => void;
   searchTerm: string;
   onSearchChange: (term: string) => void;
   selectedSeverity: string;
@@ -49,12 +48,12 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
   firmsStatus,
   isRefreshingSatellites,
   onRefreshSatellites,
-  soundEnabled,
-  onToggleSound,
   onOpenThresholds,
   onOpenExport,
   onOpenWidgets,
   onOpenIndiaCommand,
+  onOpenIncidentHistory,
+  onOpenReportSighting,
   searchTerm,
   onSearchChange,
   selectedSeverity,
@@ -76,20 +75,17 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
         {/* Brand & System Status */}
         <div className="flex items-center gap-2 sm:gap-3 w-full xl:w-auto justify-between">
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* Clickable Logo Toggle */}
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              title={theme === 'dark' ? 'Dark Theme (Black with Orange). Click logo to switch to Light Theme' : 'Light Theme (White with Orange). Click logo to switch to Dark Theme'}
-              className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden shadow-[0_0_20px_rgba(249,115,22,0.4)] border border-orange-500/40 flex-shrink-0 hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+            {/* Brand Logo */}
+            <div
+              className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden shadow-[0_0_20px_rgba(249,115,22,0.4)] border border-orange-500/40 flex-shrink-0 select-none"
             >
               <img
                 key={theme}
                 src={theme === 'dark' ? '/logo/dark-logo.svg' : '/logo/light-logo.svg'}
                 alt={theme === 'dark' ? 'PyroGuard Dark Logo' : 'PyroGuard Light Logo'}
-                className="w-full h-full object-cover transition-transform duration-500 hover:rotate-6"
+                className="w-full h-full object-cover"
               />
-            </button>
+            </div>
 
             {/* Brand Title */}
             <div>
@@ -104,28 +100,8 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             </div>
           </div>
 
-          {/* NASA Satellite Live Feed Status Pill & Manual Sync Button */}
+          {/* Manual Sync Button */}
           <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
-            <div
-              onClick={onOpenThresholds}
-              title="Click to view NASA FIRMS Satellite Feed configuration"
-              className={`cursor-pointer flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-md border text-[10px] sm:text-[11px] font-mono shadow-[0_0_12px_rgba(16,185,129,0.15)] transition-all ${
-                theme === 'light'
-                  ? 'bg-emerald-50 border-emerald-400 text-emerald-800 hover:bg-emerald-100 font-bold'
-                  : 'bg-black/60 backdrop-blur-md border-emerald-500/40 text-emerald-400 hover:bg-emerald-950/40 hover:border-emerald-400'
-              }`}
-            >
-              <Satellite className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-500 flex-shrink-0" />
-              <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2 bg-emerald-500"></span>
-              </span>
-              <span className={theme === 'light' ? 'hidden sm:inline text-slate-700 font-bold' : 'hidden sm:inline text-slate-400'}>NASA FIRMS:</span>
-              <span className={theme === 'light' ? 'font-black text-emerald-800' : 'font-bold text-emerald-300'}>
-                {firmsStatus?.isRealData ? 'LIVE' : 'SYNCED'}
-              </span>
-            </div>
-
             {onRefreshSatellites && (
               <button
                 onClick={onRefreshSatellites}
@@ -243,21 +219,26 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Audio Siren Toggle */}
+            {/* Light / Dark Theme Toggle */}
             <button
-              onClick={onToggleSound}
-              title={soundEnabled ? 'Acoustic Siren Enabled' : 'Acoustic Siren Muted'}
-              className={`p-1.5 sm:p-2 rounded-lg border backdrop-blur-md transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
+              type="button"
+              onClick={onToggleTheme}
+              title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
+              className={`relative flex items-center w-14 h-8 sm:w-16 sm:h-9 rounded-full border transition-colors cursor-pointer flex-shrink-0 ${
                 theme === 'light'
-                  ? (soundEnabled
-                    ? 'bg-orange-100 border-orange-400 text-orange-700 hover:bg-orange-200 shadow-sm'
-                    : 'bg-white border-slate-300 text-slate-600 hover:text-slate-900 shadow-sm')
-                  : (soundEnabled
-                    ? 'bg-orange-500/15 border-orange-500/40 text-orange-400 hover:bg-orange-500/25 shadow-[0_0_12px_rgba(249,115,22,0.25)]'
-                    : 'bg-black/50 border-white/10 text-slate-500 hover:text-slate-300')
+                  ? 'bg-orange-50 border-orange-300'
+                  : 'bg-black/60 border-white/10'
               }`}
             >
-              {soundEnabled ? <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              <span
+                className={`absolute top-1 left-1 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-md flex items-center justify-center transition-transform duration-300 ${
+                  theme === 'light'
+                    ? 'translate-x-0 bg-white text-orange-500'
+                    : 'translate-x-6 sm:translate-x-7 bg-slate-900 text-orange-400'
+                }`}
+              >
+                {theme === 'light' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              </span>
             </button>
 
             {/* India Command Center Dedicated Button */}
@@ -298,6 +279,32 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
               <Download className="w-3.5 h-3.5 flex-shrink-0 text-black" />
               <span className="hidden xs:inline">Audit & GIS</span>
               <span className="xs:hidden">Export</span>
+            </button>
+
+            {/* Incident History (Supabase-backed) */}
+            <button
+              onClick={onOpenIncidentHistory}
+              title="Incident History (Supabase)"
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-white border-orange-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 shadow-sm'
+                  : 'bg-black/50 backdrop-blur-md border-white/10 text-slate-300 hover:text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+              }`}
+            >
+              <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            {/* Report a Fire Sighting (citizen ground-truth report) */}
+            <button
+              onClick={onOpenReportSighting}
+              title="Report a Fire Sighting"
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-white border-orange-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 shadow-sm'
+                  : 'bg-black/50 backdrop-blur-md border-white/10 text-slate-300 hover:text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+              }`}
+            >
+              <MapPinPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {/* Widget Layout Toggle */}

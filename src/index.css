@@ -195,37 +195,77 @@ html[data-theme="light"] .glass-button:hover,
   box-shadow: 0 0 15px rgba(234, 88, 12, 0.2) !important;
 }
 
-/* Light Mode Background Overrides for common translucent dark boxes */
-html.light .bg-black\/75,
+/* Light Mode Background Overrides for common translucent dark boxes.
+   Covers every standard Tailwind opacity step (5-95) rather than only the
+   specific values in use today - components have repeatedly added new
+   bg-black/bg-slate-9xx opacity variants (e.g. /20, /40, /70, /85) that this
+   list didn't anticipate, leaving those elements dark with light theme's
+   already-flipped text on top (unreadable dark-on-dark). */
+html.light .bg-black\/5,
+html.light .bg-black\/10,
+html.light .bg-black\/20,
+html.light .bg-black\/25,
+html.light .bg-black\/30,
+html.light .bg-black\/40,
+html.light .bg-black\/50,
+html.light .bg-black\/60,
 html.light .bg-black\/70,
+html.light .bg-black\/75,
 html.light .bg-black\/80,
 html.light .bg-black\/85,
 html.light .bg-black\/90,
-html.light .bg-black\/95,
-html.light .bg-black\/60,
-html.light .bg-black\/50,
-html.light .bg-black\/40,
-html.light .bg-black\/30 {
+html.light .bg-black\/95 {
   background-color: rgba(255, 255, 255, 0.96) !important;
 }
 
 html.light .bg-slate-950,
 html.light .bg-slate-900,
-html.light .bg-slate-900\/95,
-html.light .bg-slate-900\/90,
-html.light .bg-slate-900\/80,
-html.light .bg-slate-900\/70,
-html.light .bg-slate-900\/60,
-html.light .bg-slate-900\/50,
-html.light .bg-slate-950\/90,
+html.light .bg-slate-950\/5,
+html.light .bg-slate-950\/10,
+html.light .bg-slate-950\/20,
+html.light .bg-slate-950\/25,
+html.light .bg-slate-950\/30,
+html.light .bg-slate-950\/40,
+html.light .bg-slate-950\/50,
+html.light .bg-slate-950\/60,
+html.light .bg-slate-950\/70,
+html.light .bg-slate-950\/75,
 html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/60 {
+html.light .bg-slate-950\/85,
+html.light .bg-slate-950\/90,
+html.light .bg-slate-950\/95,
+html.light .bg-slate-900\/5,
+html.light .bg-slate-900\/10,
+html.light .bg-slate-900\/20,
+html.light .bg-slate-900\/25,
+html.light .bg-slate-900\/30,
+html.light .bg-slate-900\/40,
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/70,
+html.light .bg-slate-900\/75,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/85,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/95 {
   background-color: #ffffff !important;
 }
 
 html.light .bg-slate-800,
+html.light .bg-slate-800\/5,
+html.light .bg-slate-800\/10,
+html.light .bg-slate-800\/20,
+html.light .bg-slate-800\/25,
+html.light .bg-slate-800\/30,
+html.light .bg-slate-800\/40,
+html.light .bg-slate-800\/50,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/70,
+html.light .bg-slate-800\/75,
 html.light .bg-slate-800\/80,
-html.light .bg-slate-800\/60 {
+html.light .bg-slate-800\/85,
+html.light .bg-slate-800\/90,
+html.light .bg-slate-800\/95 {
   background-color: #f1f5f9 !important;
 }
 

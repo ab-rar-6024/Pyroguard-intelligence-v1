@@ -239,8 +239,9 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
 
       processedHotspots.push(anomaly);
 
-      // Auto-trigger CAD emergency dispatch if within high danger zone
-      if (minDistance <= closestFac.blastRadiusKm * 1.5 || (threat.severity === 'CRITICAL' && minDistance <= 15.0)) {
+      // Auto-trigger CAD emergency dispatch if within high danger zone.
+      // Gated on FRP so sub-5MW sensor noise near a facility doesn't spam dispatches.
+      if (raw.frp >= 5 && (minDistance <= closestFac.blastRadiusKm * 1.5 || (threat.severity === 'CRITICAL' && minDistance <= 15.0))) {
         generatedAlerts.push({
           id: `CAD-${Date.now()}-${idx}`,
           timestamp: new Date().toISOString(),
@@ -302,4 +303,94 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
 
 export function getCachedAnomalies(): ThermalAnomaly[] {
   return cachedRealAnomalies;
+}
+
+// One-time startup backfill: pulls NASA FIRMS' historical NRT archive (day_range is
+// capped at 5 for this API key/source combination - the API rejects anything higher
+// with "Invalid day range. Expects [1..5]") so "persistent thermal source" detection has
+// real multi-day history to work with immediately, instead of only accumulating from the
+// moment the server first started. Only keeps detections near a known industrial
+// facility (<=60km) since that's the pool persistence detection actually cares about -
+// global wildfire noise would balloon storage for no analytical benefit here.
+export async function fetchHistoricalFIRMSBackfill(dayRange: number = 5): Promise<ThermalAnomaly[]> {
+  if (!currentMapKey || currentMapKey.length < 10) return [];
+
+  const rawDetections: RawFIRMSData[] = [];
+
+  const fetchPromises = GLOBAL_BBOX_REGIONS.map(async (region) => {
+    try {
+      const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/${dayRange}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'PyroGuard-Industrial-Fire-Monitor/2.0' },
+        signal: AbortSignal.timeout(20000)
+      });
+      if (res.ok) {
+        const csvText = await res.text();
+        if (csvText && !csvText.toLowerCase().includes('invalid')) {
+          const defaultSat = region.instrument.includes('NOAA20') ? 'VIIRS-NOAA20' : 'VIIRS-SNPP';
+          rawDetections.push(...parseFIRMSCSV(csvText, defaultSat));
+        } else if (csvText) {
+          console.warn(`NASA FIRMS backfill rejected for region ${region.name}: ${csvText.slice(0, 100)}`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`NASA FIRMS backfill fetch error for region ${region.name}:`, err.message);
+    }
+  });
+
+  await Promise.all(fetchPromises);
+  if (rawDetections.length === 0) {
+    console.warn('[NASA FIRMS] Historical backfill: 0 raw detections returned across all regions.');
+    return [];
+  }
+
+  const nearFacilityAnomalies: ThermalAnomaly[] = [];
+
+  rawDetections.forEach((raw, idx) => {
+    let closestFac = GLOBAL_INDUSTRIAL_FACILITIES[0];
+    let minDistance = 999999;
+    GLOBAL_INDUSTRIAL_FACILITIES.forEach(fac => {
+      const dist = calculateDistanceKm(raw.latitude, raw.longitude, fac.latitude, fac.longitude);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestFac = fac;
+      }
+    });
+
+    if (minDistance > 60) return; // only industrially-relevant history matters here
+
+    const windSpeed = Math.round(10 + Math.abs(Math.sin(raw.latitude * 0.1)) * 30);
+    const windDir = Math.round((Math.abs(raw.longitude * 3.7) + 120) % 360);
+    const windEval = evaluateWindRisk(raw.latitude, raw.longitude, closestFac.latitude, closestFac.longitude, windDir, windSpeed);
+    const threat = calculateThreatScore(minDistance, raw.frp, closestFac, windEval.riskType, windSpeed);
+
+    nearFacilityAnomalies.push({
+      id: `FIRMS-BACKFILL-${raw.satellite.slice(0, 5)}-${idx + 1}-${Math.floor(Math.random() * 900 + 100)}`,
+      latitude: raw.latitude,
+      longitude: raw.longitude,
+      brightness: Number(raw.brightness.toFixed(1)),
+      bright_t31: raw.bright_t31 ? Number(raw.bright_t31.toFixed(1)) : undefined,
+      frp: Number(raw.frp.toFixed(1)),
+      scan: raw.scan,
+      track: raw.track,
+      acq_date: raw.acq_date,
+      acq_time: raw.acq_time,
+      satellite: raw.satellite,
+      confidence: threat.severity === 'CRITICAL' ? 'critical' : raw.confidence,
+      daynight: raw.daynight,
+      windSpeedKmh: windSpeed,
+      windDirectionDeg: windDir,
+      nearestFacility: {
+        facility: closestFac,
+        distanceKm: Number(minDistance.toFixed(2)),
+        threatScore: threat.score,
+        threatLevel: threat.severity,
+        timeToImpactHours: threat.timeToImpactHours,
+        windSpreadRisk: windEval.riskType
+      }
+    });
+  });
+
+  console.log(`[NASA FIRMS] Historical backfill: ${nearFacilityAnomalies.length} industrially-relevant detections across ${dayRange} days.`);
+  return nearFacilityAnomalies;
 }

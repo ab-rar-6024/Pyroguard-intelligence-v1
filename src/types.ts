@@ -84,7 +84,6 @@ export interface NotificationThresholds {
   minFrpMW: number;
   minRiskScore: number;
   autoDispatchEnabled: boolean;
-  soundAlarmEnabled: boolean;
   browserPushEnabled: boolean;
   repeatAlertIntervalMinutes: number;
 }
@@ -92,7 +91,7 @@ export interface NotificationThresholds {
 export type AppTheme = 'dark' | 'light';
 
 export interface GISLayerConfig {
-  mapStyle: 'dark' | 'light' | 'satellite' | 'terrain' | 'osm';
+  mapStyle: 'dark' | 'light' | 'satellite' | 'terrain' | 'osm' | 'nasa-live';
   showThermalOverlay: boolean;
   showFacilityMarkers: boolean;
   showBlastZones: boolean;

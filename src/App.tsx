@@ -4,6 +4,8 @@ import { InteractiveThermalMap } from './components/InteractiveThermalMap';
 import { ThreatMatrixWidget } from './components/ThreatMatrixWidget';
 import { LiveIncidentFeed } from './components/LiveIncidentFeed';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
+import { IncidentHistoryModal } from './components/IncidentHistoryModal';
+import { ReportFireSightingModal } from './components/ReportFireSightingModal';
 import { AIThreatIntelligenceModal } from './components/AIThreatIntelligenceModal';
 import { ThresholdSettingsModal } from './components/ThresholdSettingsModal';
 import { GISExportModal } from './components/GISExportModal';
@@ -20,7 +22,6 @@ import {
   FIRMSFeedStatus,
   AppTheme
 } from './types';
-import { playEmergencySiren, playDispatchChirp, playRadarPing } from './utils/audioAlert';
 
 export default function App() {
   // Theme State
@@ -28,6 +29,15 @@ export default function App() {
     const saved = localStorage.getItem('pyroguard_theme');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
   });
+
+  // Preload both logo variants so the very first theme toggle swaps instantly
+  // instead of showing a brief blank/flash while the other SVG fetches.
+  useEffect(() => {
+    ['/logo/dark-logo.svg', '/logo/light-logo.svg'].forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, []);
 
   // State
   const [anomalies, setAnomalies] = useState<ThermalAnomaly[]>([]);
@@ -49,14 +59,13 @@ export default function App() {
   const [showFastAPIModal, setShowFastAPIModal] = useState(false);
   const [showWidgetsDrawer, setShowWidgetsDrawer] = useState(false);
   const [showIndiaModal, setShowIndiaModal] = useState(false);
+  const [showIncidentHistory, setShowIncidentHistory] = useState(false);
+  const [showReportSighting, setShowReportSighting] = useState(false);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSector, setSelectedSector] = useState('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState('ALL');
-
-  // Audio Siren
-  const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Thresholds Configuration
   const [thresholds, setThresholds] = useState<NotificationThresholds>({
@@ -64,7 +73,6 @@ export default function App() {
     minFrpMW: 30,
     minRiskScore: 65,
     autoDispatchEnabled: true,
-    soundAlarmEnabled: true,
     browserPushEnabled: false,
     repeatAlertIntervalMinutes: 10,
   });
@@ -98,21 +106,12 @@ export default function App() {
     }
   }, [theme]);
 
-  // Toggle theme and dynamically switch base map if it's currently on dark/light
+  // Toggle theme instantly (CSS-only). The map base layer is intentionally left alone -
+  // swapping it here used to trigger a live tile re-fetch from ESRI's servers on every
+  // toggle, causing a visible blank-map flash/lag. Map style is still picked independently
+  // via the Dark/Satellite quick-toggle or the GIS Overlays menu.
   const handleToggleTheme = () => {
-    setTheme((prev) => {
-      const nextTheme: AppTheme = prev === 'dark' ? 'light' : 'dark';
-      setGisConfig((prevGis) => {
-        if (prevGis.mapStyle === 'dark' && nextTheme === 'light') {
-          return { ...prevGis, mapStyle: 'light' };
-        }
-        if (prevGis.mapStyle === 'light' && nextTheme === 'dark') {
-          return { ...prevGis, mapStyle: 'dark' };
-        }
-        return prevGis;
-      });
-      return nextTheme;
-    });
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
   // Widget Visibility State
@@ -128,7 +127,7 @@ export default function App() {
   });
 
   // Fetch initial telemetry
-  const fetchData = useCallback(async (isBackground = false) => {
+  const fetchData = useCallback(async () => {
     try {
       const [thermalRes, facRes, alertRes] = await Promise.all([
         fetch('/api/thermal/live'),
@@ -155,9 +154,6 @@ export default function App() {
         setAlerts(alertData.data);
       }
 
-      if (isBackground) {
-        playRadarPing();
-      }
     } catch (err) {
       console.error('Error fetching live telemetry:', err);
     } finally {
@@ -173,7 +169,7 @@ export default function App() {
       if (data.status) {
         setFirmsStatus(data.status);
       }
-      await fetchData(true);
+      await fetchData();
     } catch (e) {
       console.error('Refresh satellites error:', e);
     } finally {
@@ -182,9 +178,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData(false);
+    fetchData();
     const interval = setInterval(() => {
-      fetchData(true);
+      fetchData();
     }, 15000);
     return () => clearInterval(interval);
   }, [fetchData]);
@@ -202,25 +198,21 @@ export default function App() {
         a.nearestFacility.threatScore >= thresholds.minRiskScore
     );
 
-    if (criticalHotspots.length > 0 && thresholds.soundAlarmEnabled && soundEnabled) {
-      // Play procedural warning siren
-      playEmergencySiren();
-
-      // Trigger browser notification if permitted
-      if (
-        thresholds.browserPushEnabled &&
-        typeof window !== 'undefined' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
-      ) {
-        const topThreat = criticalHotspots[0];
-        new Notification(`🚨 PYROGUARD CRITICAL THREAT: ${topThreat.nearestFacility?.facility.name}`, {
-          body: `Thermal anomaly detected ${topThreat.nearestFacility?.distanceKm.toFixed(1)} km away (${topThreat.frp} MW). High ignition risk!`,
-          icon: '/favicon.ico',
-        });
-      }
+    // Trigger browser notification if permitted
+    if (
+      criticalHotspots.length > 0 &&
+      thresholds.browserPushEnabled &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      const topThreat = criticalHotspots[0];
+      new Notification(`🚨 PYROGUARD CRITICAL THREAT: ${topThreat.nearestFacility?.facility.name}`, {
+        body: `Thermal anomaly detected ${topThreat.nearestFacility?.distanceKm.toFixed(1)} km away (${topThreat.frp} MW). High ignition risk!`,
+        icon: '/favicon.ico',
+      });
     }
-  }, [anomalies, facilities, thresholds, soundEnabled]);
+  }, [anomalies, facilities, thresholds]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -231,6 +223,8 @@ export default function App() {
         setShowExportModal(false);
         setShowFastAPIModal(false);
         setShowWidgetsDrawer(false);
+        setShowIncidentHistory(false);
+        setShowReportSighting(false);
       } else if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setShowExportModal(true);
@@ -261,7 +255,6 @@ export default function App() {
       const data = await res.json();
       if (data.success && data.alert) {
         setAlerts((prev) => [data.alert, ...prev]);
-        playDispatchChirp();
       }
     } catch (err) {
       console.error('Dispatch trigger error:', err);
@@ -314,12 +307,12 @@ export default function App() {
         firmsStatus={firmsStatus}
         isRefreshingSatellites={isRefreshingSatellites}
         onRefreshSatellites={handleRefreshSatellites}
-        soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
         onOpenThresholds={() => setShowThresholdsModal(true)}
         onOpenExport={() => setShowExportModal(true)}
         onOpenWidgets={() => setShowWidgetsDrawer(true)}
         onOpenIndiaCommand={() => setShowIndiaModal(true)}
+        onOpenIncidentHistory={() => setShowIncidentHistory(true)}
+        onOpenReportSighting={() => setShowReportSighting(true)}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         selectedSeverity={selectedSeverity}
@@ -459,6 +452,16 @@ export default function App() {
             setSelectedAnomaly(null);
           }}
         />
+      )}
+
+      {/* Incident History (Supabase-backed durable fire detection log) */}
+      {showIncidentHistory && (
+        <IncidentHistoryModal onClose={() => setShowIncidentHistory(false)} />
+      )}
+
+      {/* Report a Fire Sighting (citizen ground-truth report) */}
+      {showReportSighting && (
+        <ReportFireSightingModal onClose={() => setShowReportSighting(false)} />
       )}
 
       {/* Widget Layout Manager Drawer */}

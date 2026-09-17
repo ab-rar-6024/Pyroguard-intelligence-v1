@@ -140,7 +140,7 @@ Immediate satellite-based early warning confirmed active high-intensity thermal 
       >
         
         {/* Modal Header */}
-        <div className="p-3.5 sm:p-5 border-b border-slate-800 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 flex items-center justify-between">
+        <div className="p-3.5 sm:p-5 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 via-white/20 to-emerald-600 flex items-center justify-center shadow-lg border border-orange-500/40 p-0.5">
               <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
@@ -246,7 +246,7 @@ Immediate satellite-based early warning confirmed active high-intensity thermal 
                 {/* 1. Nuclear Sector */}
                 <div 
                   onClick={() => { setActiveTab('facilities'); setSectorFilter('nuclear'); }}
-                  className="p-4 rounded-xl bg-gradient-to-br from-amber-950/40 to-slate-900 border border-amber-500/30 hover:border-amber-400 transition-all cursor-pointer group"
+                  className="p-4 rounded-xl bg-slate-900/60 border border-amber-500/30 hover:border-amber-400 transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -267,7 +267,7 @@ Immediate satellite-based early warning confirmed active high-intensity thermal 
                 {/* 2. Fuel Depots & Petrol Bunks */}
                 <div 
                   onClick={() => { setActiveTab('facilities'); setSectorFilter('petrol'); }}
-                  className="p-4 rounded-xl bg-gradient-to-br from-blue-950/40 to-slate-900 border border-blue-500/30 hover:border-blue-400 transition-all cursor-pointer group"
+                  className="p-4 rounded-xl bg-slate-900/60 border border-blue-500/30 hover:border-blue-400 transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
@@ -288,7 +288,7 @@ Immediate satellite-based early warning confirmed active high-intensity thermal 
                 {/* 3. Mining Complexes */}
                 <div 
                   onClick={() => { setActiveTab('facilities'); setSectorFilter('mining'); }}
-                  className="p-4 rounded-xl bg-gradient-to-br from-orange-950/40 to-slate-900 border border-orange-500/30 hover:border-orange-400 transition-all cursor-pointer group"
+                  className="p-4 rounded-xl bg-slate-900/60 border border-orange-500/30 hover:border-orange-400 transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="p-2 rounded-lg bg-orange-500/10 text-orange-400 border border-orange-500/20">

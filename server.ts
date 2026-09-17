@@ -6,18 +6,29 @@ import { createServer as createViteServer } from 'vite';
 import { GLOBAL_INDUSTRIAL_FACILITIES } from './src/data/industrialDatabase';
 import { calculateDistanceKm, evaluateWindRisk, calculateThreatScore, exportToGeoJSON, exportToCSV } from './src/utils/gisCalculations';
 import { ThermalAnomaly, IndustrialFacility, EmergencyAlert } from './src/types';
-import { 
-  fetchLiveFIRMSHotspots, 
-  getFIRMSStatus, 
-  setNasaFirmsKey, 
-  getNasaFirmsKey, 
-  getCachedAnomalies 
+import {
+  fetchLiveFIRMSHotspots,
+  fetchHistoricalFIRMSBackfill,
+  getFIRMSStatus,
+  setNasaFirmsKey,
+  getNasaFirmsKey,
+  getCachedAnomalies
 } from './src/utils/nasaFirmsService';
+import {
+  persistAnomaliesToSupabase,
+  isSupabaseConfigured,
+  fetchStoredFireDetections,
+  fetchCitizenReports,
+  submitCitizenReport,
+  enrichPendingDetectionsWithOsmLanduse,
+  fetchPersistentThermalSources
+} from './src/utils/supabaseService';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-app.use(express.json());
+// 10mb limit to accommodate base64-encoded citizen report photos (client-side compressed).
+app.use(express.json({ limit: '10mb' }));
 
 // In-memory store for real-time alerts and satellite anomalies
 let activeAlerts: EmergencyAlert[] = [
@@ -184,13 +195,38 @@ async function refreshNASAData() {
     }
     console.log(`[NASA FIRMS] Live satellite anomalies updated (${cachedAnomalies.length} active thermal detections).`);
   }
+
+  if (isSupabaseConfigured()) {
+    await persistAnomaliesToSupabase(cachedAnomalies);
+    // Fire-and-forget: throttled OSM enrichment shouldn't block the 15s refresh cadence.
+    enrichPendingDetectionsWithOsmLanduse();
+  }
 }
 
 // Start live sync immediately
 refreshNASAData();
 
-// Poll NASA FIRMS every 5 minutes in background
-setInterval(refreshNASAData, 5 * 60 * 1000);
+// Poll NASA FIRMS every 15 seconds in background
+setInterval(refreshNASAData, 15 * 1000);
+
+// One-time startup backfill of the last 10 days of NASA FIRMS history near industrial
+// facilities, so "persistent thermal source" detection (3+ distinct days) has real data
+// to work with immediately rather than waiting days for it to accumulate from scratch.
+async function backfillHistoricalData() {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const historicalAnomalies = await fetchHistoricalFIRMSBackfill(5);
+    if (historicalAnomalies.length > 0) {
+      await persistAnomaliesToSupabase(historicalAnomalies);
+      console.log(`[NASA FIRMS] Backfill complete: ${historicalAnomalies.length} historical detections persisted.`);
+    } else {
+      console.log('[NASA FIRMS] Backfill found no industrially-relevant historical detections.');
+    }
+  } catch (err: any) {
+    console.error('[NASA FIRMS] Historical backfill failed:', err.message);
+  }
+}
+backfillHistoricalData();
 
 // ================= API ROUTES =================
 
@@ -205,7 +241,8 @@ app.get('/api/health', (req: Request, res: Response) => {
     activeFacilities: GLOBAL_INDUSTRIAL_FACILITIES.length,
     activeAlerts: activeAlerts.length,
     firmsStatus,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY)
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    supabaseConfigured: isSupabaseConfigured()
   });
 });
 
@@ -275,6 +312,91 @@ app.get('/api/thermal/live', (req: Request, res: Response) => {
     total: filtered.length,
     data: filtered
   });
+});
+
+// GET /api/thermal/history - Return stored fire detections from Supabase
+app.get('/api/thermal/history', async (req: Request, res: Response) => {
+  if (!isSupabaseConfigured()) {
+    return res.json({ success: true, configured: false, total: 0, data: [] });
+  }
+
+  // Capped at 2000 rather than a few hundred: the fire_type category breakdown needs a
+  // representative sample. A tight limit sorted by recorded_at can get dominated by
+  // whichever batch (e.g. a historical backfill) most recently touched the table,
+  // producing a skewed/degenerate category split right after any large write.
+  const limit = req.query.limit ? Math.min(2000, Number(req.query.limit)) : 300;
+  const { data, error } = await fetchStoredFireDetections(limit);
+
+  if (error) {
+    return res.status(500).json({ success: false, configured: true, error });
+  }
+
+  res.json({ success: true, configured: true, total: data.length, data });
+});
+
+// GET /api/thermal/persistent - Return recurring thermal sources (gas flares, coal seam
+// fires, etc.) that have been observed on multiple distinct satellite acquisition dates
+app.get('/api/thermal/persistent', async (req: Request, res: Response) => {
+  if (!isSupabaseConfigured()) {
+    return res.json({ success: true, configured: false, total: 0, data: [] });
+  }
+
+  const windowDays = req.query.windowDays ? Math.min(90, Number(req.query.windowDays)) : 30;
+  const minDistinctDays = req.query.minDistinctDays ? Number(req.query.minDistinctDays) : 3;
+  const { data, error } = await fetchPersistentThermalSources(windowDays, minDistinctDays);
+
+  if (error) {
+    return res.status(500).json({ success: false, configured: true, error });
+  }
+
+  res.json({ success: true, configured: true, total: data.length, data });
+});
+
+// GET /api/citizen-reports - Return community-submitted fire sightings from Supabase
+app.get('/api/citizen-reports', async (req: Request, res: Response) => {
+  if (!isSupabaseConfigured()) {
+    return res.json({ success: true, configured: false, total: 0, data: [] });
+  }
+
+  const { data, error } = await fetchCitizenReports(100);
+
+  if (error) {
+    return res.status(500).json({ success: false, configured: true, error });
+  }
+
+  res.json({ success: true, configured: true, total: data.length, data });
+});
+
+// POST /api/citizen-reports - Submit a ground-truth fire sighting (location + required
+// verification photo) that the satellite hasn't caught yet.
+app.post('/api/citizen-reports', async (req: Request, res: Response) => {
+  if (!isSupabaseConfigured()) {
+    return res.status(503).json({ success: false, error: 'Supabase is not configured on the server.' });
+  }
+
+  const { description, latitude, longitude, landmark, reporterName, photoDataUrl } = req.body;
+
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+    return res.status(400).json({ success: false, error: 'A valid location (latitude/longitude) is required.' });
+  }
+  if (!photoDataUrl || typeof photoDataUrl !== 'string') {
+    return res.status(400).json({ success: false, error: 'A reference photo is required to verify authenticity.' });
+  }
+
+  const { data, error } = await submitCitizenReport({
+    description: description || '',
+    latitude,
+    longitude,
+    landmark,
+    reporterName,
+    photoDataUrl,
+  });
+
+  if (error) {
+    return res.status(500).json({ success: false, error });
+  }
+
+  res.json({ success: true, report: data });
 });
 
 // GET /api/facilities - Return world industrial facilities database

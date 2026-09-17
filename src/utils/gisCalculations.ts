@@ -1,5 +1,63 @@
-import { ThermalAnomaly, IndustrialFacility, AnomalySeverity, EmergencyAlert, AIAuditReport } from '../types';
+import { ThermalAnomaly, IndustrialFacility, IndustryType, AnomalySeverity, EmergencyAlert, AIAuditReport } from '../types';
 import jsPDF from 'jspdf';
+
+export type FireType = 'WILDFIRE' | 'URBAN_FIRE' | 'GAS_FLARE' | 'MINING_THERMAL' | 'UNCLASSIFIED';
+
+const FLARE_FACILITY_TYPES: IndustryType[] = ['oil_refinery', 'lng_terminal', 'chemical_plant', 'fertilizer_plant'];
+const URBAN_FACILITY_TYPES: IndustryType[] = [
+  'manufacturing_hub', 'petrol_bunk_hub', 'timber_mill', 'power_plant',
+  'nuclear_plant', 'strategic_defense', 'ammunition_depot',
+];
+
+// Classifies a detection into a human-facing incident category based on the
+// nearest facility's industry type and proximity - used for the Incident
+// History breakdown (Wildfire / Urban Fire / Gas Flare / Mining Thermal / Unclassified).
+export function classifyFireType(
+  distanceKm: number,
+  frpMW: number,
+  facility?: IndustrialFacility
+): FireType {
+  if (!facility || distanceKm > 25) {
+    return 'WILDFIRE';
+  }
+  if (facility.type === 'mining_complex' && distanceKm <= 10) {
+    return 'MINING_THERMAL';
+  }
+  if (FLARE_FACILITY_TYPES.includes(facility.type) && distanceKm <= 2.5 && frpMW < 40) {
+    return 'GAS_FLARE';
+  }
+  if (URBAN_FACILITY_TYPES.includes(facility.type) && distanceKm <= 15) {
+    return 'URBAN_FIRE';
+  }
+  return 'UNCLASSIFIED';
+}
+
+// Refines the facility-distance heuristic above with ground-truth OSM land-use data.
+// The facility database wins when it already confidently ties a detection to a known
+// industrial site (GAS_FLARE / URBAN_FIRE / MINING_THERMAL); OSM only steps in for the
+// ambiguous WILDFIRE/UNCLASSIFIED cases, where it can confirm real forest/farmland or
+// reveal industrial/mining land our facility registry doesn't cover.
+export function refineFireTypeWithOsm(
+  heuristicType: FireType,
+  osmCategory: 'industrial' | 'mining' | 'forest' | 'farmland' | 'residential' | 'unknown'
+): FireType {
+  if (heuristicType !== 'WILDFIRE' && heuristicType !== 'UNCLASSIFIED') {
+    return heuristicType;
+  }
+  switch (osmCategory) {
+    case 'industrial':
+      return 'URBAN_FIRE';
+    case 'mining':
+      return 'MINING_THERMAL';
+    case 'residential':
+      return 'URBAN_FIRE';
+    case 'forest':
+    case 'farmland':
+      return 'WILDFIRE';
+    default:
+      return heuristicType;
+  }
+}
 
 // Haversine formula to compute great circle distance in km
 export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -94,10 +152,20 @@ export function calculateThreatScore(
   const spreadRateKmh = Math.max(0.4, 0.6 + windBoost + (frpMW / 500));
   const timeToImpactHours = Number((distanceKm / spreadRateKmh).toFixed(1));
 
+  // Proximity + hazard + wind alone can reach a totalScore of ~70 even with
+  // near-zero FRP (a 1km-away EXTREME facility in direct wind scores 50+10+10
+  // before FRP is even factored in), so CRITICAL/HIGH require the fire itself
+  // to be intense enough to be a real threat - not just close - on BOTH the
+  // composite-score path and the proximity-override path. Otherwise sub-3MW
+  // sensor noise or flare-level signatures near a facility get flagged
+  // CRITICAL/HIGH purely by distance, which reads as arbitrary/"random" severity.
+  const isSignificantFire = frpMW >= 8;
+  const isModerateFire = frpMW >= 3;
+
   let severity: AnomalySeverity = 'WATCH';
-  if (totalScore >= 75 || distanceKm <= facility.blastRadiusKm) {
+  if (isSignificantFire && (totalScore >= 75 || distanceKm <= facility.blastRadiusKm)) {
     severity = 'CRITICAL';
-  } else if (totalScore >= 55 || distanceKm <= facility.toxicPlumeRadiusKm) {
+  } else if (isModerateFire && (totalScore >= 55 || distanceKm <= facility.toxicPlumeRadiusKm)) {
     severity = 'HIGH';
   } else if (totalScore >= 35 || distanceKm <= 15.0) {
     severity = 'ELEVATED';

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { 
-  X, 
-  Settings, 
-  Bell, 
-  Volume2, 
-  ShieldAlert, 
+  X,
+  Settings,
+  Bell,
+  ShieldAlert,
   Radio, 
   Sliders, 
   Save,
@@ -253,18 +252,6 @@ export const ThresholdSettingsModal: React.FC<ThresholdSettingsModalProps> = ({
             <div className="font-bold text-slate-200 uppercase text-[11px] mb-1">
               Alert Notification Channels
             </div>
-
-            <label className="flex items-center justify-between text-slate-300 cursor-pointer">
-              <span className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-amber-400" /> Acoustic Klaxon / Warning Siren
-              </span>
-              <input
-                type="checkbox"
-                checked={form.soundAlarmEnabled}
-                onChange={(e) => setForm({ ...form, soundAlarmEnabled: e.target.checked })}
-                className="accent-orange-500 rounded"
-              />
-            </label>
 
             <div className="flex items-center justify-between text-slate-300">
               <span className="flex items-center gap-2">
