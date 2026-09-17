@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 import { GLOBAL_INDUSTRIAL_FACILITIES } from './src/data/industrialDatabase';
 import { calculateDistanceKm, evaluateWindRisk, calculateThreatScore, exportToGeoJSON, exportToCSV } from './src/utils/gisCalculations';
 import { ThermalAnomaly, IndustrialFacility, EmergencyAlert } from './src/types';
@@ -203,30 +202,28 @@ async function refreshNASAData() {
   }
 }
 
-// Start live sync immediately
-refreshNASAData();
-
-// Poll NASA FIRMS every 15 seconds in background
-setInterval(refreshNASAData, 15 * 1000);
-
-// One-time startup backfill of the last 10 days of NASA FIRMS history near industrial
-// facilities, so "persistent thermal source" detection (3+ distinct days) has real data
-// to work with immediately rather than waiting days for it to accumulate from scratch.
-async function backfillHistoricalData() {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const historicalAnomalies = await fetchHistoricalFIRMSBackfill(5);
-    if (historicalAnomalies.length > 0) {
-      await persistAnomaliesToSupabase(historicalAnomalies);
-      console.log(`[NASA FIRMS] Backfill complete: ${historicalAnomalies.length} historical detections persisted.`);
-    } else {
-      console.log('[NASA FIRMS] Backfill found no industrially-relevant historical detections.');
+// Start background sync if running as a persistent Node server (not serverless)
+if (!process.env.VERCEL) {
+  refreshNASAData();
+  setInterval(refreshNASAData, 15 * 1000);
+  
+  // One-time startup backfill of the last 10 days of NASA FIRMS history near industrial facilities
+  async function backfillHistoricalData() {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const historicalAnomalies = await fetchHistoricalFIRMSBackfill(5);
+      if (historicalAnomalies.length > 0) {
+        await persistAnomaliesToSupabase(historicalAnomalies);
+        console.log(`[NASA FIRMS] Backfill complete: ${historicalAnomalies.length} historical detections persisted.`);
+      } else {
+        console.log('[NASA FIRMS] Backfill found no industrially-relevant historical detections.');
+      }
+    } catch (err: any) {
+      console.error('[NASA FIRMS] Historical backfill failed:', err.message);
     }
-  } catch (err: any) {
-    console.error('[NASA FIRMS] Historical backfill failed:', err.message);
   }
+  backfillHistoricalData();
 }
-backfillHistoricalData();
 
 // ================= API ROUTES =================
 
@@ -1285,6 +1282,7 @@ if __name__ == "__main__":
 // Start Server and Vite Middleware
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
