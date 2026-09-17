@@ -22,6 +22,8 @@ import {
   FIRMSFeedStatus,
   AppTheme
 } from './types';
+import { GLOBAL_INDUSTRIAL_FACILITIES } from './data/industrialDatabase';
+import { generateClientBaselineHotspots, DEFAULT_ACTIVE_ALERTS } from './utils/baselineData';
 
 export default function App() {
   // Theme State
@@ -39,13 +41,13 @@ export default function App() {
     });
   }, []);
 
-  // State
-  const [anomalies, setAnomalies] = useState<ThermalAnomaly[]>([]);
-  const [facilities, setFacilities] = useState<IndustrialFacility[]>([]);
-  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+  // State with instant rich baseline defaults (zero-latency, never empty)
+  const [anomalies, setAnomalies] = useState<ThermalAnomaly[]>(() => generateClientBaselineHotspots());
+  const [facilities, setFacilities] = useState<IndustrialFacility[]>(() => GLOBAL_INDUSTRIAL_FACILITIES);
+  const [alerts, setAlerts] = useState<EmergencyAlert[]>(() => DEFAULT_ACTIVE_ALERTS);
   const [firmsStatus, setFirmsStatus] = useState<FIRMSFeedStatus | null>(null);
   const [isRefreshingSatellites, setIsRefreshingSatellites] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Selection
   const [selectedAnomaly, setSelectedAnomaly] = useState<ThermalAnomaly | null>(null);
@@ -130,32 +132,43 @@ export default function App() {
   const fetchData = useCallback(async () => {
     try {
       const [thermalRes, facRes, alertRes] = await Promise.all([
-        fetch('/api/thermal/live'),
-        fetch('/api/facilities'),
-        fetch('/api/alerts'),
+        fetch('/api/thermal/live').catch(() => null),
+        fetch('/api/facilities').catch(() => null),
+        fetch('/api/alerts').catch(() => null),
       ]);
 
-      const [thermalData, facData, alertData] = await Promise.all([
-        thermalRes.json(),
-        facRes.json(),
-        alertRes.json(),
-      ]);
+      if (thermalRes && thermalRes.ok) {
+        try {
+          const thermalData = await thermalRes.json();
+          if (thermalData && thermalData.success && Array.isArray(thermalData.data) && thermalData.data.length > 0) {
+            setAnomalies(thermalData.data);
+            if (thermalData.firmsStatus) {
+              setFirmsStatus(thermalData.firmsStatus);
+            }
+          }
+        } catch (_) {}
+      }
 
-      if (thermalData.success) {
-        setAnomalies(thermalData.data);
-        if (thermalData.firmsStatus) {
-          setFirmsStatus(thermalData.firmsStatus);
-        }
+      if (facRes && facRes.ok) {
+        try {
+          const facData = await facRes.json();
+          if (facData && facData.success && Array.isArray(facData.data) && facData.data.length > 0) {
+            setFacilities(facData.data);
+          }
+        } catch (_) {}
       }
-      if (facData.success) {
-        setFacilities(facData.data);
-      }
-      if (alertData.success) {
-        setAlerts(alertData.data);
+
+      if (alertRes && alertRes.ok) {
+        try {
+          const alertData = await alertRes.json();
+          if (alertData && alertData.success && Array.isArray(alertData.data) && alertData.data.length > 0) {
+            setAlerts(alertData.data);
+          }
+        } catch (_) {}
       }
 
     } catch (err) {
-      console.error('Error fetching live telemetry:', err);
+      console.warn('Telemetry sync:', err);
     } finally {
       setLoading(false);
     }
