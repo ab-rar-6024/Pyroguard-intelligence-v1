@@ -306,12 +306,6 @@ html.light .text-slate-600 {
   font-weight: 600 !important;
 }
 
-html.light p,
-html.light span,
-html.light div,
-html.light label {
-  text-shadow: none !important;
-}
 
 /* Turn neon low-contrast colors into rich, dark, high-contrast tones on white */
 html.light .text-orange-400,
@@ -601,3 +595,22 @@ html.light .scrollbar-glass::-webkit-scrollbar-thumb:hover {
 .leaflet-dark-tooltip::before {
   border-top-color: rgba(6, 9, 15, 0.88) !important;
 }
+
+/* ===== Theme switch: instant apply + circular "wave" reveal of the live new-theme UI ===== */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+}
+
+/* Skip style/layout work for offscreen sections and list rows (speeds up theme restyle) */
+main > *:not(:first-child) { content-visibility: auto; contain-intrinsic-size: auto 700px; }
+.divide-y > * { content-visibility: auto; contain-intrinsic-size: auto 60px; }
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2; }

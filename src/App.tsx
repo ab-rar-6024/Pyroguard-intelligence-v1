@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { HeaderHUD } from './components/HeaderHUD';
 import { InteractiveThermalMap } from './components/InteractiveThermalMap';
 import { ThreatMatrixWidget } from './components/ThreatMatrixWidget';
@@ -6,6 +7,7 @@ import { LiveIncidentFeed } from './components/LiveIncidentFeed';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { IncidentHistoryModal } from './components/IncidentHistoryModal';
 import { ReportFireSightingModal } from './components/ReportFireSightingModal';
+import { SentinelImageryModal } from './components/SentinelImageryModal';
 import { AIThreatIntelligenceModal } from './components/AIThreatIntelligenceModal';
 import { ThresholdSettingsModal } from './components/ThresholdSettingsModal';
 import { GISExportModal } from './components/GISExportModal';
@@ -63,6 +65,7 @@ export default function App() {
   const [showIndiaModal, setShowIndiaModal] = useState(false);
   const [showIncidentHistory, setShowIncidentHistory] = useState(false);
   const [showReportSighting, setShowReportSighting] = useState(false);
+  const [showSentinel, setShowSentinel] = useState(false);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,8 +115,48 @@ export default function App() {
   // swapping it here used to trigger a live tile re-fetch from ESRI's servers on every
   // toggle, causing a visible blank-map flash/lag. Map style is still picked independently
   // via the Dark/Satellite quick-toggle or the GIS Overlays menu.
-  const handleToggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  // "Wave" theme switch: the real UI stays fully visible - an expanding circle from the click
+  // point reveals the same UI already re-coloured in the new theme (View Transitions API:
+  // old-theme snapshot underneath, live new-theme page revealed via clip-path). Per-element CSS
+  // transitions are suspended while the theme applies so the change itself is one clean frame.
+  const handleToggleTheme = (e?: React.MouseEvent) => {
+    const next: AppTheme = theme === 'dark' ? 'light' : 'dark';
+    const root = document.documentElement;
+    const apply = () => {
+      root.classList.toggle('light', next === 'light');
+      root.classList.toggle('dark', next === 'dark');
+      root.setAttribute('data-theme', next);
+      flushSync(() => setTheme(next));
+    };
+    const cleanup = () => root.classList.remove('theme-switching');
+
+    const doc = document as Document & {
+      startViewTransition?: (cb: () => void) => { ready: Promise<void>; finished: Promise<void> };
+    };
+    root.classList.add('theme-switching');
+
+    if (!doc.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      apply();
+      setTimeout(cleanup, 80);
+      return;
+    }
+
+    const rect = (e?.currentTarget as HTMLElement | undefined)?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : 0;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+
+    const transition = doc.startViewTransition(apply);
+    transition.ready
+      .then(() => {
+        root.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          { duration: 750, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', pseudoElement: '::view-transition-new(root)' }
+        );
+      })
+      .catch(cleanup);
+    transition.finished.finally(cleanup);
+    setTimeout(cleanup, 3000); // safety net
   };
 
   // Widget Visibility State
@@ -238,6 +281,7 @@ export default function App() {
         setShowWidgetsDrawer(false);
         setShowIncidentHistory(false);
         setShowReportSighting(false);
+        setShowSentinel(false);
       } else if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setShowExportModal(true);
@@ -288,7 +332,14 @@ export default function App() {
   };
 
   // Filtered anomalies by search
-  const filteredAnomalies = anomalies.filter((a) => {
+  // Stable object identity: the map rebuilds every marker whenever this prop changes,
+  // which made each unrelated App re-render (e.g. theme toggle) block for ~1s.
+  const mapGisConfig = useMemo(
+    () => ({ ...gisConfig, selectedFacilityType: selectedSector, selectedSeverity }),
+    [gisConfig, selectedSector, selectedSeverity]
+  );
+
+  const filteredAnomalies = useMemo(() => anomalies.filter((a) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     const facName = a.nearestFacility?.facility.name.toLowerCase() || '';
@@ -302,7 +353,7 @@ export default function App() {
       sat.includes(term) ||
       a.id.toLowerCase().includes(term)
     );
-  });
+  }), [anomalies, searchTerm]);
 
   return (
     <div className={`min-h-screen ${theme === 'light' ? 'light bg-[#f8fafc] text-slate-900' : 'dark bg-[#030508] text-slate-100'} bg-ambient-glow flex flex-col selection:bg-orange-500/40 selection:text-orange-200 relative overflow-x-hidden transition-colors duration-300`}>
@@ -326,6 +377,7 @@ export default function App() {
         onOpenIndiaCommand={() => setShowIndiaModal(true)}
         onOpenIncidentHistory={() => setShowIncidentHistory(true)}
         onOpenReportSighting={() => setShowReportSighting(true)}
+        onOpenSentinel={() => setShowSentinel(true)}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         selectedSeverity={selectedSeverity}
@@ -350,11 +402,7 @@ export default function App() {
               onOpenEvacAdvisor={handleOpenEvacAdvisor}
               onTriggerDispatch={handleTriggerDispatch}
               onOpenIndiaCommand={() => setShowIndiaModal(true)}
-              gisConfig={{
-                ...gisConfig,
-                selectedFacilityType: selectedSector,
-                selectedSeverity: selectedSeverity,
-              }}
+              gisConfig={mapGisConfig}
               onUpdateGISConfig={(newCfg) => {
                 if (newCfg.selectedFacilityType !== undefined) {
                   setSelectedSector(newCfg.selectedFacilityType);
@@ -470,6 +518,11 @@ export default function App() {
       {/* Incident History (Supabase-backed durable fire detection log) */}
       {showIncidentHistory && (
         <IncidentHistoryModal onClose={() => setShowIncidentHistory(false)} />
+      )}
+
+      {/* Sentinel-2 visual confirmation + land-cover context */}
+      {showSentinel && (
+        <SentinelImageryModal anomalies={anomalies} onClose={() => setShowSentinel(false)} />
       )}
 
       {/* Report a Fire Sighting (citizen ground-truth report) */}

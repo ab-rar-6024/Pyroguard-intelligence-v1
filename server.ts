@@ -202,6 +202,17 @@ async function refreshNASAData() {
   }
 }
 
+// On Vercel there's no persistent process to run the interval below, so each
+// serverless invocation of a data route calls this first - it refreshes only
+// when the cache looks stale/empty, turning polling into refresh-on-request.
+let lastRefreshAt = 0;
+async function ensureFreshDataOnServerless() {
+  if (!process.env.VERCEL) return;
+  if (Date.now() - lastRefreshAt < 60 * 1000) return;
+  lastRefreshAt = Date.now();
+  await refreshNASAData();
+}
+
 // Start background sync if running as a persistent Node server (not serverless)
 if (!process.env.VERCEL) {
   refreshNASAData();
@@ -228,7 +239,8 @@ if (!process.env.VERCEL) {
 // ================= API ROUTES =================
 
 // Health check & System Status
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/api/health', async (req: Request, res: Response) => {
+  await ensureFreshDataOnServerless();
   const firmsStatus = getFIRMSStatus();
   res.json({
     status: 'online',
@@ -284,7 +296,8 @@ app.post('/api/thermal/refresh', async (req: Request, res: Response) => {
 });
 
 // GET /api/thermal/live - Return all live FIRMS thermal anomalies
-app.get('/api/thermal/live', (req: Request, res: Response) => {
+app.get('/api/thermal/live', async (req: Request, res: Response) => {
+  await ensureFreshDataOnServerless();
   const { minFRP, severity, sector } = req.query;
   const status = getFIRMSStatus();
 
@@ -394,6 +407,42 @@ app.post('/api/citizen-reports', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, report: data });
+});
+
+// GET /api/sentinel/scenes - Latest Sentinel-2 L2A scenes covering a coordinate (free, keyless
+// Earth Search STAC API) used as visual confirmation of a thermal detection.
+app.get('/api/sentinel/scenes', async (req: Request, res: Response) => {
+  const lat = Number(req.query.lat);
+  const lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return res.status(400).json({ success: false, error: 'lat and lon are required numbers.' });
+  }
+  try {
+    const stacRes = await fetch('https://earth-search.aws.element84.com/v1/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        collections: ['sentinel-2-l2a'],
+        intersects: { type: 'Point', coordinates: [lon, lat] },
+        limit: 6,
+        sortby: [{ field: 'properties.datetime', direction: 'desc' }],
+        query: { 'eo:cloud_cover': { lt: 70 } },
+      }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!stacRes.ok) throw new Error(`STAC API status ${stacRes.status}`);
+    const json = await stacRes.json();
+    const scenes = (json.features || []).map((f: any) => ({
+      id: f.id,
+      datetime: f.properties?.datetime,
+      cloudCover: f.properties?.['eo:cloud_cover'],
+      platform: f.properties?.platform,
+      thumbnail: f.assets?.thumbnail?.href || null,
+    }));
+    res.json({ success: true, total: scenes.length, data: scenes });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Sentinel-2 catalog unavailable' });
+  }
 });
 
 // GET /api/facilities - Return world industrial facilities database
@@ -1281,7 +1330,10 @@ if __name__ == "__main__":
 
 // Start Server and Vite Middleware
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  // The bundled build (dist/server.cjs, run via `npm start`) must serve static files even when
+  // NODE_ENV isn't set (Windows shells don't support `NODE_ENV=production cmd`).
+  const isBundledBuild = typeof __filename !== 'undefined' && __filename.endsWith('.cjs');
+  if (process.env.NODE_ENV !== 'production' && !isBundledBuild) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },

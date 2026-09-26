@@ -15,13 +15,14 @@ import {
   Sun,
   Moon,
   History,
-  MapPinPlus
+  MapPinPlus,
+  Satellite
 } from 'lucide-react';
 import { ThermalAnomaly, EmergencyAlert, FIRMSFeedStatus, AppTheme } from '../types';
 
 interface HeaderHUDProps {
   theme: AppTheme;
-  onToggleTheme: () => void;
+  onToggleTheme: (e?: React.MouseEvent) => void;
   anomalies: ThermalAnomaly[];
   alerts: EmergencyAlert[];
   firmsStatus?: FIRMSFeedStatus | null;
@@ -34,6 +35,7 @@ interface HeaderHUDProps {
   onOpenIndiaCommand?: () => void;
   onOpenIncidentHistory: () => void;
   onOpenReportSighting: () => void;
+  onOpenSentinel: () => void;
   searchTerm: string;
   onSearchChange: (term: string) => void;
   selectedSeverity: string;
@@ -54,6 +56,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
   onOpenIndiaCommand,
   onOpenIncidentHistory,
   onOpenReportSighting,
+  onOpenSentinel,
   searchTerm,
   onSearchChange,
   selectedSeverity,
@@ -219,26 +222,18 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Light / Dark Theme Toggle */}
+            {/* Light / Dark Theme Button (shows the mode you'll switch to) */}
             <button
               type="button"
               onClick={onToggleTheme}
               title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-              className={`relative flex items-center w-14 h-8 sm:w-16 sm:h-9 rounded-full border transition-colors cursor-pointer flex-shrink-0 ${
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
                 theme === 'light'
-                  ? 'bg-orange-50 border-orange-300'
-                  : 'bg-black/60 border-white/10'
+                  ? 'bg-white border-orange-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 shadow-sm'
+                  : 'bg-black/50 backdrop-blur-md border-white/10 text-slate-300 hover:text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_12px_rgba(249,115,22,0.2)]'
               }`}
             >
-              <span
-                className={`absolute top-1 left-1 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-md flex items-center justify-center transition-transform duration-300 ${
-                  theme === 'light'
-                    ? 'translate-x-0 bg-white text-orange-500'
-                    : 'translate-x-6 sm:translate-x-7 bg-slate-900 text-orange-400'
-                }`}
-              >
-                {theme === 'light' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-              </span>
+              {theme === 'dark' ? <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
             </button>
 
             {/* India Command Center Dedicated Button */}
@@ -292,6 +287,19 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
               }`}
             >
               <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            {/* Sentinel-2 visual confirmation */}
+            <button
+              onClick={onOpenSentinel}
+              title="Sentinel-2 Visual Confirmation"
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-white border-orange-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 shadow-sm'
+                  : 'bg-black/50 backdrop-blur-md border-white/10 text-slate-300 hover:text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+              }`}
+            >
+              <Satellite className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {/* Report a Fire Sighting (citizen ground-truth report) */}
