@@ -17,16 +17,15 @@ import proj4 from 'proj4';
 // geotiff's CJS build (dist-node) internally requires quick-lru, which ships ESM-only -
 // synchronous require() of it throws under stricter Node runtimes that don't support
 // require(esm) (Vercel's serverless functions among them, even though plain local Node
-// tolerates it). Loading geotiff via a genuine dynamic import() instead makes Node
-// resolve geotiff's own ESM build, which imports quick-lru the same way and never hits
-// that require() path. The indirection through `new Function` stops esbuild from
-// rewriting import() into require() at bundle time, which would reintroduce the crash.
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-  specifier: string
-) => Promise<typeof import('geotiff')>;
+// tolerates it). A genuine dynamic import() instead makes Node resolve geotiff's own ESM
+// build (which imports quick-lru the same way and never hits that require() path), and -
+// because 'geotiff' is left external by the esbuild build (--packages=external) - esbuild
+// passes this import() through unchanged rather than rewriting it into a require() call.
+// Being a literal import() also keeps it visible to Vercel's build-time dependency tracer,
+// which needs to see it to bundle geotiff into the deployed function at all.
 let geotiffModulePromise: Promise<typeof import('geotiff')> | null = null;
 function loadGeotiff(): Promise<typeof import('geotiff')> {
-  if (!geotiffModulePromise) geotiffModulePromise = dynamicImport('geotiff');
+  if (!geotiffModulePromise) geotiffModulePromise = import('geotiff');
   return geotiffModulePromise;
 }
 
