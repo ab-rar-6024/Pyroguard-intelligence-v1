@@ -27,6 +27,10 @@ import {
 import { GLOBAL_INDUSTRIAL_FACILITIES } from './data/industrialDatabase';
 import { generateClientBaselineHotspots, DEFAULT_ACTIVE_ALERTS } from './utils/baselineData';
 
+// PS 26162 scope: a thermal detection counts as "industrial" when it falls within this
+// radius of a known industrial facility. Used by the Industrial/All Fires navbar toggle.
+const INDUSTRIAL_RADIUS_KM = 5;
+
 export default function App() {
   // Theme State
   const [theme, setTheme] = useState<AppTheme>(() => {
@@ -71,6 +75,9 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSector, setSelectedSector] = useState('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState('ALL');
+  // Default view is industrial-only per problem statement scope; "All Fires" (navbar
+  // toggle) lifts the 5km facility-proximity filter to also show wildfires etc.
+  const [fireViewMode, setFireViewMode] = useState<'industrial' | 'all'>('industrial');
 
   // Thresholds Configuration
   const [thresholds, setThresholds] = useState<NotificationThresholds>({
@@ -340,6 +347,12 @@ export default function App() {
   );
 
   const filteredAnomalies = useMemo(() => anomalies.filter((a) => {
+    // Default view: industrial fires only - any thermal detection within 5km of a known
+    // industrial facility. "All Fires" mode (toggled in the navbar) lifts this and shows
+    // every detection, industrial and natural (wildfire) alike.
+    if (fireViewMode === 'industrial' && (a.nearestFacility?.distanceKm ?? Infinity) > INDUSTRIAL_RADIUS_KM) {
+      return false;
+    }
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     const facName = a.nearestFacility?.facility.name.toLowerCase() || '';
@@ -353,7 +366,7 @@ export default function App() {
       sat.includes(term) ||
       a.id.toLowerCase().includes(term)
     );
-  }), [anomalies, searchTerm]);
+  }), [anomalies, searchTerm, fireViewMode]);
 
   return (
     <div className={`min-h-screen ${theme === 'light' ? 'light bg-[#f8fafc] text-slate-900' : 'dark bg-[#030508] text-slate-100'} bg-ambient-glow flex flex-col selection:bg-orange-500/40 selection:text-orange-200 relative overflow-x-hidden transition-colors duration-300`}>
@@ -382,6 +395,8 @@ export default function App() {
         onSearchChange={setSearchTerm}
         selectedSeverity={selectedSeverity}
         onSeverityChange={setSelectedSeverity}
+        fireViewMode={fireViewMode}
+        onFireViewModeChange={setFireViewMode}
       />
 
       {/* 2. Main Command Center Grid */}
@@ -394,6 +409,7 @@ export default function App() {
           <div className="xl:col-span-8 flex flex-col">
             <InteractiveThermalMap
               anomalies={filteredAnomalies}
+              fireViewMode={fireViewMode}
               facilities={facilities}
               selectedAnomaly={selectedAnomaly}
               selectedFacility={selectedFacility}

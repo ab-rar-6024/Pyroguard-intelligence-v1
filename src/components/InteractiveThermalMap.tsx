@@ -26,6 +26,10 @@ import {
 } from 'lucide-react';
 import { ThermalAnomaly, IndustrialFacility, GISLayerConfig } from '../types';
 
+const BASE_STYLE_LABELS: Record<GISLayerConfig['mapStyle'], string> = {
+  dark: 'Dark', light: 'Light', satellite: 'Satellite', terrain: 'Terrain', osm: 'OSM', 'nasa-live': 'NASA Live',
+};
+
 interface InteractiveThermalMapProps {
   anomalies: ThermalAnomaly[];
   facilities: IndustrialFacility[];
@@ -38,6 +42,10 @@ interface InteractiveThermalMapProps {
   gisConfig: GISLayerConfig;
   onUpdateGISConfig: (newConfig: Partial<GISLayerConfig>) => void;
   onOpenIndiaCommand?: () => void;
+  /** Industrial/All Fires scope (see HeaderHUD) - used only to re-frame the map onto
+   *  whatever the current filter actually found, so switching scope never leaves the
+   *  view pointed at an empty patch of ocean while real matches sit off-screen. */
+  fireViewMode?: 'industrial' | 'all';
 }
 
 const CONTINENTS = [
@@ -63,6 +71,7 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
   gisConfig,
   onUpdateGISConfig,
   onOpenIndiaCommand,
+  fireViewMode,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -70,6 +79,10 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const blastZonesLayerRef = useRef<L.LayerGroup | null>(null);
   const windVectorsLayerRef = useRef<L.LayerGroup | null>(null);
+  // Tracks scope-reframing state (see the fireViewMode effect below): the previous
+  // scope value, and whether the current scope had any matches last render.
+  const prevFireViewModeRef = useRef(fireViewMode);
+  const hadAnyInScopeRef = useRef(anomalies.length > 0);
 
   const [activeContinent, setActiveContinent] = useState('Global');
   const [showLocationMenu, setShowLocationMenu] = useState(false);
@@ -144,6 +157,13 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
       tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}';
       maxNativeZoom = 18;
       maxZoom = 19;
+    } else if (gisConfig.mapStyle === 'nasa-live') {
+      // NASA GIBS VIIRS true-colour daily composite - real near-real-time satellite
+      // imagery (GIBS publishes with ~1 day latency, so request yesterday's pass).
+      const gibsDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${gibsDate}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
+      maxNativeZoom = 9;
+      maxZoom = 19;
     } else {
       // Standard OpenStreetMap
       tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -157,6 +177,29 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
       subdomains,
     }).addTo(map);
   }, [gisConfig.mapStyle]);
+
+  // Re-frame the map when the Industrial/All Fires scope changes, or when a live poll
+  // makes the first match appear after the current scope had none. Industrial mode can
+  // legitimately narrow the whole world down to a handful of detections anywhere on
+  // Earth - without this, the map stays parked at whatever it was panned to and a real
+  // match sitting off-screen looks identical to "nothing found". Guarded so it doesn't
+  // re-fly on every routine 15s poll once the view already has something in frame.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const modeChanged = prevFireViewModeRef.current !== fireViewMode;
+    const justAppeared = !hadAnyInScopeRef.current && anomalies.length > 0;
+    prevFireViewModeRef.current = fireViewMode;
+    hadAnyInScopeRef.current = anomalies.length > 0;
+
+    if (!map || (!modeChanged && !justAppeared) || anomalies.length === 0) return;
+
+    if (anomalies.length === 1) {
+      map.flyTo([anomalies[0].latitude, anomalies[0].longitude], 8, { duration: 1.2 });
+      return;
+    }
+    const bounds = L.latLngBounds(anomalies.map((a) => [a.latitude, a.longitude] as [number, number]));
+    map.flyToBounds(bounds.pad(0.4), { maxZoom: 7, duration: 1.2 });
+  }, [fireViewMode, anomalies]);
 
   // Render Hotspots, Industrial Markers, Blast Buffers, and Wind Vectors
   useEffect(() => {
@@ -611,16 +654,17 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
                 Base Map Layer
               </div>
               <div className="grid grid-cols-2 gap-1.5 mb-3">
-                {(['dark', 'light', 'satellite', 'terrain', 'osm'] as const).map((style) => (
+                {(['dark', 'light', 'satellite', 'terrain', 'osm', 'nasa-live'] as const).map((style) => (
                   <button
                     key={style}
                     onClick={() => onUpdateGISConfig({ mapStyle: style })}
+                    title={style === 'nasa-live' ? 'NASA GIBS live satellite imagery (VIIRS true-colour)' : undefined}
                     className={`px-2.5 py-1.5 rounded-lg text-center capitalize transition-all cursor-pointer ${gisConfig.mapStyle === style
                       ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-black font-bold shadow-[0_0_12px_rgba(249,115,22,0.4)]'
                       : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
                       }`}
                   >
-                    {style}
+                    {BASE_STYLE_LABELS[style]}
                   </button>
                 ))}
               </div>
@@ -911,6 +955,17 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
           <span>Wind Propagation</span>
         </div>
       </div>
+
+      {/* Industrial scope, currently zero matches: make that an explicit, readable state
+          instead of a map that just looks empty/broken. */}
+      {fireViewMode === 'industrial' && anomalies.length === 0 && (
+        <div className="absolute inset-x-0 top-16 sm:top-20 z-20 flex justify-center pointer-events-none px-3">
+          <div className="pointer-events-auto flex items-center gap-2 px-3.5 py-2 rounded-xl bg-black/85 backdrop-blur-md border border-amber-500/40 text-amber-300 text-[11px] sm:text-xs font-mono shadow-[0_4px_20px_rgba(0,0,0,0.6)]">
+            <Flame className="w-3.5 h-3.5 flex-shrink-0" />
+            No active thermal detection is currently within 5km of a monitored industrial facility. Switch to "All Fires" to see the full live feed.
+          </div>
+        </div>
+      )}
 
       {/* Leaflet Map DOM Target */}
       <div ref={mapContainerRef} className="w-full h-full flex-1 z-0" />

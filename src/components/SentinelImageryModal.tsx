@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Satellite, X, Loader2, Cloud, Calendar, Layers, MapPin, Flame } from 'lucide-react';
+import { Satellite, X, Loader2, Cloud, Calendar, Layers, MapPin, Flame, ScanSearch, TriangleAlert } from 'lucide-react';
 import { ThermalAnomaly } from '../types';
 import { classifyFireType } from '../utils/gisCalculations';
 
@@ -11,6 +11,24 @@ interface Scene {
   platform: string | null;
   thumbnail: string | null;
 }
+
+interface BurnScarResult {
+  sceneId: string;
+  datetime: string | null;
+  cloudCover: number | null;
+  meanNBR: number;
+  burnedPixelPercent: number;
+  validPixelCount: number;
+  severity: 'NONE' | 'LOW' | 'MODERATE' | 'HIGH';
+  method: string;
+}
+
+const SEVERITY_STYLE: Record<BurnScarResult['severity'], string> = {
+  NONE: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+  LOW: 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10',
+  MODERATE: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
+  HIGH: 'text-rose-400 border-rose-500/40 bg-rose-500/10',
+};
 
 interface SentinelImageryModalProps {
   anomalies: ThermalAnomaly[];
@@ -42,6 +60,9 @@ export const SentinelImageryModal: React.FC<SentinelImageryModalProps> = ({ anom
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('s2');
+  const [burnScar, setBurnScar] = useState<BurnScarResult | null>(null);
+  const [burnScarLoading, setBurnScarLoading] = useState(false);
+  const [burnScarError, setBurnScarError] = useState<string | null>(null);
 
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -107,6 +128,8 @@ export const SentinelImageryModal: React.FC<SentinelImageryModalProps> = ({ anom
     setLoading(true);
     setError(null);
     setScenes([]);
+    setBurnScar(null);
+    setBurnScarError(null);
     fetch(`/api/sentinel/scenes?lat=${selected.latitude}&lon=${selected.longitude}`)
       .then((r) => r.json())
       .then((d) => {
@@ -123,6 +146,21 @@ export const SentinelImageryModal: React.FC<SentinelImageryModalProps> = ({ anom
 
   const nf = selected?.nearestFacility;
   const fireType = selected ? classifyFireType(nf?.distanceKm ?? 999, selected.frp, nf?.facility) : null;
+
+  const runBurnScarAnalysis = () => {
+    if (!selected) return;
+    setBurnScarLoading(true);
+    setBurnScarError(null);
+    const sceneParam = scenes[0]?.id ? `&sceneId=${encodeURIComponent(scenes[0].id)}` : '';
+    fetch(`/api/sentinel/burn-scar?lat=${selected.latitude}&lon=${selected.longitude}${sceneParam}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setBurnScar(d.data);
+        else setBurnScarError(d.error || 'Burn-scar analysis failed.');
+      })
+      .catch(() => setBurnScarError('Could not reach the burn-scar analysis service.'))
+      .finally(() => setBurnScarLoading(false));
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 font-mono text-slate-100">
@@ -212,6 +250,56 @@ export const SentinelImageryModal: React.FC<SentinelImageryModalProps> = ({ anom
                 <div className="text-[10px] text-slate-500">
                   Switch to <em>ESA WorldCover</em> to check whether the hotspot sits on forest/cropland (natural) or built-up/bare land (industrial).
                 </div>
+              </div>
+            )}
+
+            {selected && (
+              <div className="p-3 rounded-xl border border-white/10 bg-black/20 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                    <ScanSearch className="w-3.5 h-3.5 text-sky-400" />
+                    Burn-scar detection (NBR)
+                  </div>
+                  <button
+                    onClick={runBurnScarAnalysis}
+                    disabled={burnScarLoading}
+                    className="px-2.5 py-1 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-400 text-[11px] font-bold hover:bg-sky-500/20 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  >
+                    {burnScarLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ScanSearch className="w-3 h-3" />}
+                    {burnScarLoading ? 'Reading NIR/SWIR bands…' : 'Analyze real Sentinel-2 bands'}
+                  </button>
+                </div>
+
+                {burnScarError && (
+                  <div className="flex items-start gap-1.5 text-rose-400 text-[11px]">
+                    <TriangleAlert className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    {burnScarError}
+                  </div>
+                )}
+
+                {burnScar && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${SEVERITY_STYLE[burnScar.severity]}`}>
+                        {burnScar.severity} burn signature
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {burnScar.burnedPixelPercent.toFixed(0)}% of sampled pixels · mean NBR {burnScar.meanNBR.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Computed from real B08 (NIR) / B12 (SWIR) reflectance, scene {burnScar.sceneId}
+                      {burnScar.datetime ? ` (${new Date(burnScar.datetime).toLocaleDateString()})` : ''} · {burnScar.validPixelCount} valid pixels sampled.
+                      Single-date NBR proxy, not a calibrated pre/post-fire dNBR severity map.
+                    </div>
+                  </div>
+                )}
+
+                {!burnScar && !burnScarError && !burnScarLoading && (
+                  <div className="text-[10px] text-slate-500">
+                    Pulls the actual near-infrared and shortwave-infrared band files for this scene (not the thumbnail) and computes the Normalized Burn Ratio - the standard remote-sensing index for charred/burned ground.
+                  </div>
+                )}
               </div>
             )}
           </div>

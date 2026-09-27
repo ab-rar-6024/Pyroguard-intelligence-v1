@@ -14,6 +14,7 @@ import {
   Wind,
   Repeat,
   MapPin,
+  TrendingUp,
 } from 'lucide-react';
 
 interface StoredFireDetection {
@@ -51,6 +52,10 @@ interface PersistentSource {
   worstThreatLevel: string | null;
   firstSeen: string;
   lastSeen: string;
+  frpAnomaly?: boolean;
+  frpZScore?: number;
+  mlFireType?: string;
+  mlConfidence?: number;
 }
 
 interface CitizenReport {
@@ -287,6 +292,15 @@ export const IncidentHistoryModal: React.FC<IncidentHistoryModalProps> = ({ onCl
                             <Repeat className="w-2.5 h-2.5" />
                             {src.distinctDaysObserved} days observed
                           </span>
+                          {src.frpAnomaly && (
+                            <span
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-rose-500/50 bg-rose-500/15 text-rose-400 text-[9px] font-bold uppercase animate-pulse"
+                              title={`Latest FRP is a ${src.frpZScore?.toFixed(1)}σ spike vs. this source's own baseline`}
+                            >
+                              <TrendingUp className="w-2.5 h-2.5" />
+                              FRP Surge
+                            </span>
+                          )}
                           <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase ${severityClass}`}>
                             {src.worstThreatLevel || 'WATCH'}
                           </span>
@@ -297,6 +311,14 @@ export const IncidentHistoryModal: React.FC<IncidentHistoryModalProps> = ({ onCl
                           <span className="text-slate-200 font-bold truncate">
                             {src.facilityName || 'Unassigned Region'}
                           </span>
+                          {src.mlFireType && (
+                            <span
+                              className="px-1.5 py-0.5 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-[9px] font-bold"
+                              title="Gradient-boosted classifier prediction (distance, FRP, OSM land-use, persistence & FRP-anomaly features)"
+                            >
+                              ML: {FIRE_TYPE_META[src.mlFireType]?.label || src.mlFireType} · {Math.round((src.mlConfidence ?? 0) * 100)}%
+                            </span>
+                          )}
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
                           <MapPin className="w-2.5 h-2.5" />

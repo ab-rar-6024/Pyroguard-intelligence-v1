@@ -1,7 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ThermalAnomaly } from '../types';
-import { classifyFireType, refineFireTypeWithOsm } from './gisCalculations';
+import { classifyFireType, refineFireTypeWithOsm, facilityKindFromType } from './gisCalculations';
 import { getOsmLanduse } from './osmLanduseService';
+import { classifyWithML } from '../ml/predict';
+import type { OsmCategory } from '../ml/predict';
 
 function toGridCell(lat: number, lon: number): string {
   return `${lat.toFixed(2)},${lon.toFixed(2)}`;
@@ -124,7 +126,7 @@ export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 
   try {
     const { data, error } = await client
       .from('fire_detections')
-      .select('id, latitude, longitude, fire_type')
+      .select('id, latitude, longitude, fire_type, facility_type, distance_km, frp_mw, daynight')
       .in('fire_type', ['WILDFIRE', 'UNCLASSIFIED'])
       .is('osm_landuse', null)
       .order('recorded_at', { ascending: false })
@@ -134,7 +136,19 @@ export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 
 
     for (const row of data) {
       const osmCategory = await getOsmLanduse(row.latitude, row.longitude);
-      const refinedType = refineFireTypeWithOsm(row.fire_type, osmCategory);
+
+      // Re-classify with the gradient-boosted model now that OSM land-use is known -
+      // a richer feature set than the plain switch-statement heuristic. Only trust it
+      // above a confidence floor; below that, fall back to the original rule so a shaky
+      // prediction never overrides a reasonable heuristic guess.
+      const ml = classifyWithML({
+        distanceKm: row.distance_km ?? 999,
+        frpMW: row.frp_mw ?? 0,
+        isNight: row.daynight === 'N',
+        facilityKind: facilityKindFromType(row.facility_type),
+        osmCategory: osmCategory as OsmCategory,
+      });
+      const refinedType = ml.confidence >= 0.5 ? ml.type : refineFireTypeWithOsm(row.fire_type, osmCategory);
 
       await client
         .from('fire_detections')
@@ -142,7 +156,7 @@ export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 
         .eq('id', row.id);
     }
 
-    console.log(`[OSM] Enriched ${data.length} thermal detections with land-use data.`);
+    console.log(`[ML] Refined ${data.length} thermal detections via OSM + gradient-boosted classifier.`);
   } catch (err: any) {
     console.error('[OSM] Unexpected error enriching detections:', err.message);
   }
@@ -159,11 +173,13 @@ export async function fetchPersistentThermalSources(
 
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
 
+  // Ascending order so the last row processed per cell is chronologically the latest -
+  // needed to tell "this cell's baseline FRP" apart from "today's FRP" below.
   const { data, error } = await client
     .from('fire_detections')
-    .select('grid_cell, acq_date, latitude, longitude, facility_name, fire_type, frp_mw, threat_level, recorded_at')
+    .select('grid_cell, acq_date, latitude, longitude, facility_name, facility_type, fire_type, osm_landuse, frp_mw, distance_km, threat_level, recorded_at')
     .gte('recorded_at', since)
-    .order('recorded_at', { ascending: false });
+    .order('recorded_at', { ascending: true });
 
   if (error) {
     return { data: [], error: error.message };
@@ -171,7 +187,8 @@ export async function fetchPersistentThermalSources(
 
   const byCell = new Map<string, {
     gridCell: string; latitude: number; longitude: number; facilityName: string | null;
-    fireType: string; distinctDates: Set<string>; maxFrpMw: number; worstThreatLevel: string | null;
+    facilityType: string | null; fireType: string; osmLanduse: string | null; distanceKm: number | null;
+    distinctDates: Set<string>; frpHistory: number[]; worstThreatLevel: string | null;
     lastSeen: string; firstSeen: string; detectionCount: number;
   }>();
 
@@ -182,15 +199,20 @@ export async function fetchPersistentThermalSources(
     if (!entry) {
       entry = {
         gridCell: row.grid_cell, latitude: row.latitude, longitude: row.longitude,
-        facilityName: row.facility_name, fireType: row.fire_type, distinctDates: new Set(),
-        maxFrpMw: 0, worstThreatLevel: null, lastSeen: row.recorded_at, firstSeen: row.recorded_at,
+        facilityName: row.facility_name, facilityType: row.facility_type, fireType: row.fire_type,
+        osmLanduse: row.osm_landuse, distanceKm: row.distance_km, distinctDates: new Set(),
+        frpHistory: [], worstThreatLevel: null, lastSeen: row.recorded_at, firstSeen: row.recorded_at,
         detectionCount: 0,
       };
       byCell.set(row.grid_cell, entry);
     }
     entry.distinctDates.add(row.acq_date);
     entry.detectionCount += 1;
-    entry.maxFrpMw = Math.max(entry.maxFrpMw, row.frp_mw || 0);
+    entry.frpHistory.push(row.frp_mw || 0);
+    // Rows arrive oldest-first, so the last write here reflects the most recent detection.
+    entry.fireType = row.fire_type;
+    entry.osmLanduse = row.osm_landuse ?? entry.osmLanduse;
+    entry.distanceKm = row.distance_km ?? entry.distanceKm;
     if (row.recorded_at > entry.lastSeen) entry.lastSeen = row.recorded_at;
     if (row.recorded_at < entry.firstSeen) entry.firstSeen = row.recorded_at;
     if (row.threat_level && (!entry.worstThreatLevel || threatRank[row.threat_level] > threatRank[entry.worstThreatLevel])) {
@@ -200,22 +222,67 @@ export async function fetchPersistentThermalSources(
 
   const persistent = Array.from(byCell.values())
     .filter((e) => e.distinctDates.size >= minDistinctDays)
-    .map((e) => ({
-      gridCell: e.gridCell,
-      latitude: e.latitude,
-      longitude: e.longitude,
-      facilityName: e.facilityName,
-      fireType: e.fireType,
-      distinctDaysObserved: e.distinctDates.size,
-      detectionCount: e.detectionCount,
-      maxFrpMw: Number(e.maxFrpMw.toFixed(1)),
-      worstThreatLevel: e.worstThreatLevel,
-      firstSeen: e.firstSeen,
-      lastSeen: e.lastSeen,
-    }))
-    .sort((a, b) => b.distinctDaysObserved - a.distinctDaysObserved);
+    .map((e) => {
+      const anomaly = computeFrpAnomaly(e.frpHistory);
+      const ml = classifyWithML({
+        distanceKm: e.distanceKm ?? 999,
+        frpMW: anomaly.latestFrpMw,
+        isNight: false,
+        facilityKind: facilityKindFromType(e.facilityType),
+        osmCategory: (e.osmLanduse as OsmCategory) ?? 'unknown',
+        persistenceDays: e.distinctDates.size,
+        frpZScore: anomaly.zScore,
+      });
+
+      return {
+        gridCell: e.gridCell,
+        latitude: e.latitude,
+        longitude: e.longitude,
+        facilityName: e.facilityName,
+        fireType: e.fireType,
+        distinctDaysObserved: e.distinctDates.size,
+        detectionCount: e.detectionCount,
+        maxFrpMw: Number(Math.max(...e.frpHistory).toFixed(1)),
+        worstThreatLevel: e.worstThreatLevel,
+        firstSeen: e.firstSeen,
+        lastSeen: e.lastSeen,
+        // Flags a source whose latest FRP is a statistical spike vs. its own history -
+        // the "radiative power surge" signature of an active fire/explosion breaking out
+        // at a facility that otherwise runs a steady, routine thermal signature.
+        frpAnomaly: anomaly.isAnomaly,
+        frpZScore: anomaly.zScore,
+        frpBaselineMw: anomaly.baselineMeanMw,
+        mlFireType: ml.type,
+        mlConfidence: ml.confidence,
+      };
+    })
+    .sort((a, b) => (Number(b.frpAnomaly) - Number(a.frpAnomaly)) || (b.distinctDaysObserved - a.distinctDaysObserved));
 
   return { data: persistent, error: null };
+}
+
+// Compares a persistent source's latest FRP reading against the mean/std of its own prior
+// history (Gaussian z-score). A source that has run at a steady FRP for weeks and then
+// spikes hard is the "radiative power surge" signature the problem statement calls out -
+// distinct from a routine, steady-state industrial heat source.
+function computeFrpAnomaly(frpHistory: number[]): {
+  zScore: number; isAnomaly: boolean; baselineMeanMw: number; latestFrpMw: number;
+} {
+  const latestFrpMw = frpHistory[frpHistory.length - 1] ?? 0;
+  if (frpHistory.length < 6) {
+    return { zScore: 0, isAnomaly: false, baselineMeanMw: latestFrpMw, latestFrpMw };
+  }
+  const baseline = frpHistory.slice(0, -1);
+  const mean = baseline.reduce((s, v) => s + v, 0) / baseline.length;
+  const variance = baseline.reduce((s, v) => s + (v - mean) ** 2, 0) / baseline.length;
+  const std = Math.sqrt(variance) || 1;
+  const zScore = (latestFrpMw - mean) / std;
+  return {
+    zScore: Number(zScore.toFixed(2)),
+    isAnomaly: zScore >= 2.5 && latestFrpMw > mean * 1.4,
+    baselineMeanMw: Number(mean.toFixed(1)),
+    latestFrpMw,
+  };
 }
 
 // Reads back citizen-submitted fire sightings for the Incident History "Citizen Reports" tab.

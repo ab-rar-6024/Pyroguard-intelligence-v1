@@ -9,6 +9,18 @@ const URBAN_FACILITY_TYPES: IndustryType[] = [
   'nuclear_plant', 'strategic_defense', 'ammunition_depot',
 ];
 
+// Collapses the full IndustryType catalog into the coarse facility "kind" the ML
+// classifier (src/ml/) was trained on. Single source of truth shared with the
+// rule-based classifyFireType above so both stay consistent.
+export type FacilityKind = 'flare' | 'mining' | 'urban' | 'other' | 'none';
+export function facilityKindFromType(type?: IndustryType | string | null): FacilityKind {
+  if (!type) return 'none';
+  if (type === 'mining_complex') return 'mining';
+  if (FLARE_FACILITY_TYPES.includes(type as IndustryType)) return 'flare';
+  if (URBAN_FACILITY_TYPES.includes(type as IndustryType)) return 'urban';
+  return 'other';
+}
+
 // Classifies a detection into a human-facing incident category based on the
 // nearest facility's industry type and proximity - used for the Incident
 // History breakdown (Wildfire / Urban Fire / Gas Flare / Mining Thermal / Unclassified).

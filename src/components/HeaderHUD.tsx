@@ -16,7 +16,8 @@ import {
   Moon,
   History,
   MapPinPlus,
-  Satellite
+  Satellite,
+  Factory
 } from 'lucide-react';
 import { ThermalAnomaly, EmergencyAlert, FIRMSFeedStatus, AppTheme } from '../types';
 
@@ -40,6 +41,8 @@ interface HeaderHUDProps {
   onSearchChange: (term: string) => void;
   selectedSeverity: string;
   onSeverityChange: (severity: string) => void;
+  fireViewMode: 'industrial' | 'all';
+  onFireViewModeChange: (mode: 'industrial' | 'all') => void;
 }
 
 export const HeaderHUD: React.FC<HeaderHUDProps> = ({
@@ -61,6 +64,8 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
   onSearchChange,
   selectedSeverity,
   onSeverityChange,
+  fireViewMode,
+  onFireViewModeChange,
 }) => {
   const criticalThreats = anomalies.filter(
     (a) => a.nearestFacility?.threatLevel === 'CRITICAL'
@@ -196,6 +201,43 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
 
         {/* Search, Severity Filter & Power Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2 w-full xl:w-auto justify-between sm:justify-end flex-wrap sm:flex-nowrap">
+
+          {/* Industrial-Only / All Fires scope toggle - PS 26162 default is industrial
+              fires only (within 5km of a known facility); this lifts that filter. */}
+          <div
+            className={`flex items-center p-0.5 rounded-lg border flex-shrink-0 ${
+              theme === 'light' ? 'bg-white border-orange-300 shadow-sm' : 'bg-black/50 backdrop-blur-md border-white/10'
+            }`}
+            role="group"
+            aria-label="Fire scope filter"
+          >
+            <button
+              type="button"
+              onClick={() => onFireViewModeChange('industrial')}
+              title="Show only thermal detections within 5km of an industrial facility"
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-[10px] sm:text-[11px] font-mono font-bold transition-all cursor-pointer min-h-[30px] ${
+                fireViewMode === 'industrial'
+                  ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-black shadow-[0_0_10px_rgba(249,115,22,0.4)]'
+                  : theme === 'light' ? 'text-slate-500 hover:text-slate-800' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Factory className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">Industrial</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onFireViewModeChange('all')}
+              title="Show all thermal detections, including wildfires and natural sources"
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-[10px] sm:text-[11px] font-mono font-bold transition-all cursor-pointer min-h-[30px] ${
+                fireViewMode === 'all'
+                  ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-black shadow-[0_0_10px_rgba(249,115,22,0.4)]'
+                  : theme === 'light' ? 'text-slate-500 hover:text-slate-800' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">All Fires</span>
+            </button>
+          </div>
 
           {/* Quick Search */}
           <div className="relative flex-1 sm:w-44 lg:w-48 min-w-[140px]">

@@ -22,6 +22,7 @@ import {
   enrichPendingDetectionsWithOsmLanduse,
   fetchPersistentThermalSources
 } from './src/utils/supabaseService';
+import { analyzeBurnScar } from './src/utils/burnScarService';
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -442,6 +443,30 @@ app.get('/api/sentinel/scenes', async (req: Request, res: Response) => {
     res.json({ success: true, total: scenes.length, data: scenes });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Sentinel-2 catalog unavailable' });
+  }
+});
+
+// GET /api/sentinel/burn-scar - Real computer-vision analysis: pulls the actual NIR (B08)
+// and SWIR (B12) Sentinel-2 reflectance bands for this location and computes the
+// Normalized Burn Ratio to estimate burned-ground coverage - not a heuristic on the
+// thumbnail, real band math on real satellite data. See burnScarService.ts for caveats.
+app.get('/api/sentinel/burn-scar', async (req: Request, res: Response) => {
+  const lat = Number(req.query.lat);
+  const lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return res.status(400).json({ success: false, error: 'lat and lon are required numbers.' });
+  }
+  const sceneId = typeof req.query.sceneId === 'string' ? req.query.sceneId : undefined;
+
+  try {
+    const timeoutMs = 25000;
+    const result = await Promise.race([
+      analyzeBurnScar(lat, lon, sceneId),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Burn-scar analysis timed out')), timeoutMs)),
+    ]);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Burn-scar analysis failed' });
   }
 });
 

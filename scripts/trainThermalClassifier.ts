@@ -1,0 +1,121 @@
+// Trains the gradient-boosted thermal-source classifier and writes the learned trees to
+// src/ml/model.generated.ts. Run with: npx tsx scripts/trainThermalClassifier.ts
+//
+// There is no public hand-labeled ground truth for "which FIRMS hotspot is an industrial
+// fire vs. a gas flare vs. a wildfire" - nobody has walked out to every satellite
+// detection on Earth and tagged it. So, like other teams tackling this same SIH problem
+// statement, training labels come from a domain simulator (simulateLabel below) that
+// encodes the same physical reasoning an analyst would use - proximity to a known
+// facility, OSM land-use, how long a source has persisted, and whether today's FRP is a
+// spike relative to its own history - with randomized inputs and injected label noise so
+// the tree ensemble learns smooth, generalizable decision boundaries instead of just
+// memorizing hard thresholds. This is a standard bootstrapping technique for exactly this
+// kind of problem when no labeled dataset exists.
+import { writeFileSync } from 'node:fs';
+import {
+  FIRE_TYPES,
+  MLFireType,
+  ThermalFeatureInput,
+  FacilityKind,
+  OsmCategory,
+  toFeatureVector,
+  predictProbabilities,
+  MultiClassModel,
+} from '../src/ml/thermalClassifier';
+import { trainBinaryGBDT } from '../src/ml/gbdt';
+
+function rand(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+function choice<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function simulateLabel(input: ThermalFeatureInput): MLFireType {
+  const { distanceKm, frpMW, facilityKind, osmCategory, persistenceDays = 0, frpZScore = 0 } = input;
+
+  // A source that has been steadily hot for weeks with no FRP spike reads as routine
+  // industrial heat (flare stack, kiln, mine face) rather than an active uncontrolled fire.
+  const isSteadyPersistent = persistenceDays >= 5 && frpZScore < 1.5;
+
+  if (facilityKind === 'mining' && distanceKm <= 12) return 'MINING_THERMAL';
+  if (osmCategory === 'mining' && distanceKm <= 15) return 'MINING_THERMAL';
+
+  if (facilityKind === 'flare' && distanceKm <= 3 && (frpMW < 45 || isSteadyPersistent)) return 'GAS_FLARE';
+
+  if ((facilityKind === 'urban' || osmCategory === 'industrial' || osmCategory === 'residential') && distanceKm <= 18) {
+    // A sudden FRP spike at an otherwise-quiet industrial/urban site is exactly what the
+    // FRP-anomaly alert (supabaseService.ts) also flags - still URBAN_FIRE as the
+    // human-facing category, but a high-confidence one.
+    return 'URBAN_FIRE';
+  }
+
+  if (osmCategory === 'forest' || osmCategory === 'farmland') return 'WILDFIRE';
+  if (facilityKind === 'none' && distanceKm > 25) return 'WILDFIRE';
+
+  return 'UNCLASSIFIED';
+}
+
+function randomSample(): { input: ThermalFeatureInput; label: MLFireType } {
+  const facilityKind = choice<FacilityKind>(['flare', 'mining', 'urban', 'other', 'none']);
+  const osmCategory = choice<OsmCategory>(['industrial', 'mining', 'forest', 'farmland', 'residential', 'unknown']);
+  const persistenceDays = Math.random() < 0.4 ? Math.floor(rand(0, 30)) : 0;
+  const frpZScore = Math.random() < 0.15 ? rand(2, 6) : rand(-1, 1.5);
+
+  const input: ThermalFeatureInput = {
+    distanceKm: facilityKind === 'none' ? rand(5, 80) : rand(0, 30),
+    frpMW: rand(1, 300),
+    isNight: Math.random() < 0.4,
+    facilityKind,
+    osmCategory,
+    persistenceDays,
+    frpZScore,
+  };
+
+  let label = simulateLabel(input);
+  if (Math.random() < 0.04) label = choice(FIRE_TYPES); // 4% label noise -> soft boundaries
+  return { input, label };
+}
+
+const N = 8000;
+const samples = Array.from({ length: N }, randomSample);
+const X = samples.map((s) => toFeatureVector(s.input));
+
+const splitAt = Math.floor(N * 0.85);
+const trainX = X.slice(0, splitAt);
+const valX = X.slice(splitAt);
+const valLabels = samples.slice(splitAt).map((s) => s.label);
+
+const binaryModels = FIRE_TYPES.map((cls) => {
+  const yTrain = samples.slice(0, splitAt).map((s) => (s.label === cls ? 1 : 0));
+  return trainBinaryGBDT(trainX, yTrain, 30, 0.15, 3);
+});
+
+const model: MultiClassModel = { classes: FIRE_TYPES, binaryModels };
+
+let correct = 0;
+const confusion: Record<string, Record<string, number>> = {};
+for (let i = 0; i < valX.length; i++) {
+  const probs = predictProbabilities(model, valX[i]);
+  const predicted = FIRE_TYPES.reduce((best, c) => (probs[c] > probs[best] ? c : best), FIRE_TYPES[0]);
+  const actual = valLabels[i];
+  if (predicted === actual) correct++;
+  confusion[actual] = confusion[actual] || {};
+  confusion[actual][predicted] = (confusion[actual][predicted] || 0) + 1;
+}
+
+console.log(`Validation accuracy: ${((correct / valX.length) * 100).toFixed(1)}% on ${valX.length} held-out samples`);
+console.log('Confusion matrix (rows=actual, cols=predicted):');
+console.table(confusion);
+
+writeFileSync(
+  'src/ml/model.generated.ts',
+  [
+    '// AUTO-GENERATED by scripts/trainThermalClassifier.ts - do not edit by hand.',
+    "import type { MultiClassModel } from './thermalClassifier';",
+    '',
+    `export const THERMAL_CLASSIFIER_MODEL: MultiClassModel = ${JSON.stringify(model)};`,
+    '',
+  ].join('\n')
+);
+console.log('Wrote src/ml/model.generated.ts');
