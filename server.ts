@@ -459,7 +459,7 @@ app.get('/api/sentinel/burn-scar', async (req: Request, res: Response) => {
   const sceneId = typeof req.query.sceneId === 'string' ? req.query.sceneId : undefined;
 
   try {
-    const timeoutMs = 25000;
+    const timeoutMs = 40000; // cold Lambda + cold COG header parse can be slow on first hit
     const result = await Promise.race([
       analyzeBurnScar(lat, lon, sceneId),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Burn-scar analysis timed out')), timeoutMs)),

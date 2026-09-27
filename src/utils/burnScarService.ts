@@ -11,8 +11,24 @@
 // clear pre-fire reference scene. Absolute-NBR thresholds below are a reasonable proxy for
 // "does this pixel currently look like burned ground vs. live vegetation", not a calibrated
 // severity index.
-import { fromUrl, GeoTIFFImage } from 'geotiff';
+import type { GeoTIFFImage } from 'geotiff';
 import proj4 from 'proj4';
+
+// geotiff's CJS build (dist-node) internally requires quick-lru, which ships ESM-only -
+// synchronous require() of it throws under stricter Node runtimes that don't support
+// require(esm) (Vercel's serverless functions among them, even though plain local Node
+// tolerates it). Loading geotiff via a genuine dynamic import() instead makes Node
+// resolve geotiff's own ESM build, which imports quick-lru the same way and never hits
+// that require() path. The indirection through `new Function` stops esbuild from
+// rewriting import() into require() at bundle time, which would reintroduce the crash.
+const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+  specifier: string
+) => Promise<typeof import('geotiff')>;
+let geotiffModulePromise: Promise<typeof import('geotiff')> | null = null;
+function loadGeotiff(): Promise<typeof import('geotiff')> {
+  if (!geotiffModulePromise) geotiffModulePromise = dynamicImport('geotiff');
+  return geotiffModulePromise;
+}
 
 const STAC_SEARCH_URL = 'https://earth-search.aws.element84.com/v1/search';
 const STAC_ITEM_URL = (id: string) => `https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/${id}`;
@@ -35,7 +51,7 @@ const imageCache = new Map<string, Promise<GeoTIFFImage>>();
 function openCachedImage(href: string): Promise<GeoTIFFImage> {
   let cached = imageCache.get(href);
   if (!cached) {
-    cached = fromUrl(href).then((tiff) => tiff.getImage());
+    cached = loadGeotiff().then(({ fromUrl }) => fromUrl(href)).then((tiff) => tiff.getImage());
     imageCache.set(href, cached);
     cached.catch(() => imageCache.delete(href)); // don't cache failures
   }
