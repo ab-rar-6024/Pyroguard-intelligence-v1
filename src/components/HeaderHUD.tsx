@@ -17,7 +17,8 @@ import {
   History,
   MapPinPlus,
   Satellite,
-  Factory
+  Factory,
+  FlaskConical
 } from 'lucide-react';
 import { ThermalAnomaly, EmergencyAlert, FIRMSFeedStatus, AppTheme } from '../types';
 
@@ -37,6 +38,7 @@ interface HeaderHUDProps {
   onOpenIncidentHistory: () => void;
   onOpenReportSighting: () => void;
   onOpenSentinel: () => void;
+  onOpenCaseStudy: () => void;
   searchTerm: string;
   onSearchChange: (term: string) => void;
   selectedSeverity: string;
@@ -60,6 +62,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
   onOpenIncidentHistory,
   onOpenReportSighting,
   onOpenSentinel,
+  onOpenCaseStudy,
   searchTerm,
   onSearchChange,
   selectedSeverity,
@@ -342,6 +345,19 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
               }`}
             >
               <Satellite className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            {/* Real-incident case studies (archived NASA data through the live classifier) */}
+            <button
+              onClick={onOpenCaseStudy}
+              title="Real-Incident Case Studies"
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-white border-orange-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 shadow-sm'
+                  : 'bg-black/50 backdrop-blur-md border-white/10 text-slate-300 hover:text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+              }`}
+            >
+              <FlaskConical className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {/* Report a Fire Sighting (citizen ground-truth report) */}

@@ -4,6 +4,6 @@
     { "source": "/api/(.*)", "destination": "/api/[...all]" }
   ],
   "functions": {
-    "api/[...all].ts": { "maxDuration": 30 }
+    "api/[...all].ts": { "maxDuration": 60 }
   }
 }

@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ThermalAnomaly } from '../types';
 import { classifyFireType, refineFireTypeWithOsm, facilityKindFromType } from './gisCalculations';
-import { getOsmLanduse } from './osmLanduseService';
+import { getOsmLanduse, isOsmTemporarilyDown } from './osmLanduseService';
 import { classifyWithML } from '../ml/predict';
 import type { OsmCategory } from '../ml/predict';
 
@@ -120,7 +120,9 @@ export async function fetchStoredFireDetections(limit: number = 100): Promise<{ 
 // Refines a small, throttled batch of ambiguous (WILDFIRE/UNCLASSIFIED) detections per
 // cycle using real OSM land-use data. Deliberately bounded to respect Overpass API
 // fair-use limits - this runs alongside the 15s FIRMS refresh, not once per detection.
-export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 6): Promise<void> {
+// One lookup per 15s cycle (~5.7k/day at most): the public Overpass servers ask for fair use and
+// throttled this app when it made 6 per cycle.
+export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 1): Promise<void> {
   if (!client) return;
 
   try {
@@ -136,6 +138,9 @@ export async function enrichPendingDetectionsWithOsmLanduse(batchSize: number = 
 
     for (const row of data) {
       const osmCategory = await getOsmLanduse(row.latitude, row.longitude);
+      // Lookup failed (all mirrors down): leave the row untouched so it is retried later,
+      // rather than permanently saving "unknown" for it.
+      if (osmCategory === 'unknown' && isOsmTemporarilyDown()) continue;
 
       // Re-classify with the gradient-boosted model now that OSM land-use is known -
       // a richer feature set than the plain switch-statement heuristic. Only trust it

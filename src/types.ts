@@ -47,7 +47,7 @@ export interface ThermalAnomaly {
   track: number;
   acq_date: string;
   acq_time: string;
-  satellite: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua';
+  satellite: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua' | 'GOES-East' | 'GOES-West';
   confidence: 'nominal' | 'high' | 'critical' | 'low';
   daynight: 'D' | 'N';
   windSpeedKmh: number;

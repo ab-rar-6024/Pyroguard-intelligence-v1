@@ -27,14 +27,16 @@ export function getFIRMSStatus(): FIRMSFeedStatus {
     apiKeyConfigured: Boolean(currentMapKey && currentMapKey.length > 10),
     lastSyncTime: lastSyncTimestamp,
     totalLiveDetections: cachedRealAnomalies.length,
-    activeSatellites: activeSatellitesList,
-    sourcesQueried: ['VIIRS_SNPP_NRT', 'VIIRS_NOAA20_NRT', 'MODIS_NRT'],
+    activeSatellites: cachedRealAnomalies.length > 0
+      ? Array.from(new Set(cachedRealAnomalies.map((a) => a.satellite)))
+      : activeSatellitesList,
+    sourcesQueried: ['VIIRS_SNPP_NRT', 'VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'GOES_NRT'],
     statusMessage: lastSyncStatusMessage
   };
 }
 
 // Global & Regional Bounding Boxes for Industrial & Petrochemical Clusters
-const GLOBAL_BBOX_REGIONS = [
+const BASE_BBOX_REGIONS = [
   { name: 'India Subcontinent & Coastal PCPIR Hubs', bbox: '68.0,7.0,97.5,36.0', instrument: 'VIIRS_SNPP_NRT' },
   { name: 'North America (Gulf Coast / Permian / Alberta)', bbox: '-130,15,-60,65', instrument: 'VIIRS_SNPP_NRT' },
   { name: 'Middle East (Persian Gulf / Ras Laffan / Jubail)', bbox: '30,12,65,40', instrument: 'VIIRS_SNPP_NRT' },
@@ -43,6 +45,15 @@ const GLOBAL_BBOX_REGIONS = [
   { name: 'South America (Santos / Patagonia / Amazon)', bbox: '-85,-55,-34,13', instrument: 'VIIRS_SNPP_NRT' },
   { name: 'Africa & Mediterranean Oil Hubs', bbox: '-20,-35,55,38', instrument: 'VIIRS_NOAA20_NRT' },
   { name: 'Oceania & Southeast Asia Arc', bbox: '110,-45,160,-10', instrument: 'VIIRS_NOAA20_NRT' }
+];
+
+// Every region is also queried on VIIRS NOAA-21 (a third polar satellite: more overpasses per
+// day, so fresher and denser coverage), and the Americas / eastern Pacific on GOES, a
+// geostationary satellite that reports new detections every ~10-20 minutes (coarser ~2 km pixels).
+const GLOBAL_BBOX_REGIONS = [
+  ...BASE_BBOX_REGIONS,
+  ...BASE_BBOX_REGIONS.map((r) => ({ ...r, instrument: 'VIIRS_NOAA21_NRT' })),
+  { name: 'Americas & East Pacific (GOES geostationary)', bbox: '-160,-55,-30,60', instrument: 'GOES_NRT' },
 ];
 
 interface RawFIRMSData {
@@ -55,12 +66,12 @@ interface RawFIRMSData {
   track: number;
   acq_date: string;
   acq_time: string;
-  satellite: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua';
+  satellite: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua' | 'GOES-East' | 'GOES-West';
   confidence: 'nominal' | 'high' | 'critical' | 'low';
   daynight: 'D' | 'N';
 }
 
-function parseFIRMSCSV(csvText: string, defaultSatellite: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'MODIS-Terra'): RawFIRMSData[] {
+function parseFIRMSCSV(csvText: string, defaultSatellite: RawFIRMSData['satellite']): RawFIRMSData[] {
   const lines = csvText.trim().split('\n');
   if (lines.length < 2) return [];
 
@@ -90,19 +101,29 @@ function parseFIRMSCSV(csvText: string, defaultSatellite: 'VIIRS-SNPP' | 'VIIRS-
     const lon = parseFloat(cols[lonIdx]);
     if (isNaN(lat) || isNaN(lon)) continue;
 
-    const brightness = brightIdx !== -1 ? parseFloat(cols[brightIdx]) || 310.0 : 310.0;
-    const brightT31 = brightT31Idx !== -1 ? parseFloat(cols[brightT31Idx]) || 290.0 : undefined;
+    // GOES rows use -999 as "not available" for brightness and give scan/track in units that
+    // are not pixel sizes; keep such placeholders out of the app (a -999 K reading would show).
+    const rawBrightness = brightIdx !== -1 ? parseFloat(cols[brightIdx]) : NaN;
+    const brightness = rawBrightness > 0 ? rawBrightness : 310.0;
+    const rawT31 = brightT31Idx !== -1 ? parseFloat(cols[brightT31Idx]) : NaN;
+    const brightT31 = brightT31Idx !== -1 ? (rawT31 > 0 ? rawT31 : 290.0) : undefined;
     const frp = frpIdx !== -1 ? parseFloat(cols[frpIdx]) || 15.0 : 15.0;
-    const scan = scanIdx !== -1 ? parseFloat(cols[scanIdx]) || 1.0 : 1.0;
-    const track = trackIdx !== -1 ? parseFloat(cols[trackIdx]) || 1.0 : 1.0;
+    const rawScan = scanIdx !== -1 ? parseFloat(cols[scanIdx]) : NaN;
+    const scan = rawScan > 0 && rawScan <= 20 ? rawScan : (scanIdx !== -1 && rawScan > 20 ? 2.0 : 1.0);
+    const rawTrack = trackIdx !== -1 ? parseFloat(cols[trackIdx]) : NaN;
+    const track = rawTrack > 0 && rawTrack <= 20 ? rawTrack : (trackIdx !== -1 && rawTrack > 20 ? 2.0 : 1.0);
     const acq_date = dateIdx !== -1 ? cols[dateIdx] : new Date().toISOString().slice(0, 10);
     const rawTime = timeIdx !== -1 ? cols[timeIdx] : '1200';
-    const acq_time = rawTime.length === 3 ? `0${rawTime.slice(0, 1)}:${rawTime.slice(1)}Z` : rawTime.length === 4 ? `${rawTime.slice(0, 2)}:${rawTime.slice(2)}Z` : `${rawTime}Z`;
+    const paddedTime = rawTime.padStart(4, '0'); // "958" -> "0958", "0" -> "0000"
+    const acq_time = `${paddedTime.slice(0, 2)}:${paddedTime.slice(2, 4)}Z`;
 
-    let sat: 'VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua' = defaultSatellite;
+    let sat: RawFIRMSData['satellite'] = defaultSatellite;
     if (satIdx !== -1) {
       const sVal = cols[satIdx].toUpperCase();
-      if (sVal === 'N' || sVal.includes('SNPP')) sat = 'VIIRS-SNPP';
+      // GOES geostationary codes: G16/G19 sit over the eastern Americas, G18 over the west.
+      if (sVal === 'G16' || sVal === 'G19') sat = 'GOES-East';
+      else if (sVal === 'G18') sat = 'GOES-West';
+      else if (sVal === 'N' || sVal.includes('SNPP')) sat = 'VIIRS-SNPP';
       else if (sVal === 'N20' || sVal.includes('NOAA20')) sat = 'VIIRS-NOAA20';
       else if (sVal === 'N21' || sVal.includes('NOAA21')) sat = 'VIIRS-NOAA21';
       else if (sVal.includes('TERRA')) sat = 'MODIS-Terra';
@@ -171,7 +192,10 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
       try {
         // day_range=2 (yesterday + today, UTC): with 1, the feed is empty for the first hours
         // after 00:00 UTC before any satellite has passed. Trimmed to the last 24h below.
-        const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/2`;
+        // GOES reports every ~10 minutes (a 2-day pull is ~127k rows / 11 MB / 25 s), and it is
+        // only useful for its freshness - so it gets just today's data.
+        const dayRange = region.instrument === 'GOES_NRT' ? 1 : 2;
+        const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/${dayRange}`;
         const res = await fetch(url, {
           headers: { 'User-Agent': 'PyroGuard-Industrial-Fire-Monitor/2.0' },
           signal: AbortSignal.timeout(45000) // 2-day regional CSVs are large
@@ -180,7 +204,13 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
         if (res.ok) {
           const csvText = await res.text();
           if (csvText && !csvText.includes('Invalid API call')) {
-            const defaultSat = region.instrument.includes('NOAA20') ? 'VIIRS-NOAA20' : 'VIIRS-SNPP';
+            const defaultSat: RawFIRMSData['satellite'] = region.instrument.includes('GOES')
+              ? 'GOES-East'
+              : region.instrument.includes('NOAA21')
+                ? 'VIIRS-NOAA21'
+                : region.instrument.includes('NOAA20')
+                  ? 'VIIRS-NOAA20'
+                  : 'VIIRS-SNPP';
             const parsed = parseFIRMSCSV(csvText, defaultSat).filter((d) => isWithinLastHours(d.acq_date, d.acq_time, 24));
             rawDetections.push(...parsed);
             successfulRegions.push(region.name);
@@ -333,7 +363,8 @@ export async function fetchHistoricalFIRMSBackfill(dayRange: number = 5): Promis
 
   const rawDetections: RawFIRMSData[] = [];
 
-  const fetchPromises = GLOBAL_BBOX_REGIONS.map(async (region) => {
+  // The one-time backfill stays on the original SNPP / NOAA-20 regions (unchanged behaviour).
+  const fetchPromises = BASE_BBOX_REGIONS.map(async (region) => {
     try {
       const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/${dayRange}`;
       const res = await fetch(url, {

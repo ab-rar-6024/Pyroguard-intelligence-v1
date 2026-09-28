@@ -8,6 +8,7 @@ import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { IncidentHistoryModal } from './components/IncidentHistoryModal';
 import { ReportFireSightingModal } from './components/ReportFireSightingModal';
 import { SentinelImageryModal } from './components/SentinelImageryModal';
+import { CaseStudyModal } from './components/CaseStudyModal';
 import { AIThreatIntelligenceModal } from './components/AIThreatIntelligenceModal';
 import { ThresholdSettingsModal } from './components/ThresholdSettingsModal';
 import { GISExportModal } from './components/GISExportModal';
@@ -70,6 +71,7 @@ export default function App() {
   const [showIncidentHistory, setShowIncidentHistory] = useState(false);
   const [showReportSighting, setShowReportSighting] = useState(false);
   const [showSentinel, setShowSentinel] = useState(false);
+  const [showCaseStudy, setShowCaseStudy] = useState(false);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -289,6 +291,7 @@ export default function App() {
         setShowIncidentHistory(false);
         setShowReportSighting(false);
         setShowSentinel(false);
+        setShowCaseStudy(false);
       } else if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setShowExportModal(true);
@@ -391,6 +394,7 @@ export default function App() {
         onOpenIncidentHistory={() => setShowIncidentHistory(true)}
         onOpenReportSighting={() => setShowReportSighting(true)}
         onOpenSentinel={() => setShowSentinel(true)}
+        onOpenCaseStudy={() => setShowCaseStudy(true)}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         selectedSeverity={selectedSeverity}
@@ -540,6 +544,9 @@ export default function App() {
       {showSentinel && (
         <SentinelImageryModal anomalies={anomalies} onClose={() => setShowSentinel(false)} />
       )}
+
+      {/* Real-incident case studies replayed from NASA's archive */}
+      {showCaseStudy && <CaseStudyModal onClose={() => setShowCaseStudy(false)} />}
 
       {/* Report a Fire Sighting (citizen ground-truth report) */}
       {showReportSighting && (

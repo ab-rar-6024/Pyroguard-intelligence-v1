@@ -23,7 +23,42 @@ interface CacheEntry {
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // land use rarely changes; cache a week
 const cache = new Map<string, CacheEntry>();
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// Public Overpass servers are shared and sometimes overloaded or rate-limiting, so several
+// independent mirrors are tried in order.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+// After every mirror has failed, stop trying for a minute instead of piling up timeouts.
+let overpassDownUntil = 0;
+
+/** True right after every Overpass mirror failed - an 'unknown' answer then means "try later", not "no data". */
+export function isOsmTemporarilyDown(): boolean {
+  return Date.now() < overpassDownUntil;
+}
+
+async function fetchOverpassJson(query: string): Promise<any> {
+  let lastError: unknown = new Error('No Overpass endpoint available');
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'PyroGuard-Industrial-Fire-Monitor/2.0 (thermal source land-use classification)',
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(7000),
+      });
+      if (res.ok) return await res.json();
+      lastError = new Error(`Overpass ${endpoint} responded with status ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
 const MIN_REQUEST_GAP_MS = 1500;
 let lastRequestAt = 0;
 let queueTail: Promise<void> = Promise.resolve();
@@ -66,24 +101,15 @@ export async function getOsmLanduse(lat: number, lon: number): Promise<OsmLandus
   if (cached && cached.expiresAt > Date.now()) {
     return cached.category;
   }
+  if (Date.now() < overpassDownUntil) return 'unknown'; // all mirrors just failed - not cached
 
   try {
     const category = await runThrottled(async () => {
       const query = `[out:json][timeout:10];(way(around:400,${lat},${lon})[landuse];way(around:400,${lat},${lon})[natural];way(around:400,${lat},${lon})[man_made];relation(around:400,${lat},${lon})[landuse];);out tags 5;`;
 
-      const res = await fetch(OVERPASS_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'PyroGuard-Industrial-Fire-Monitor/2.0 (thermal source land-use classification)',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(12000),
-      });
-
-      if (!res.ok) return 'unknown' as OsmLanduseCategory;
-
-      const json = await res.json();
+      // Throws when every mirror fails, so a rate-limit / outage is NOT cached for a week by the
+      // code below - the catch block returns 'unknown' without caching it.
+      const json = await fetchOverpassJson(query);
       const elements: Array<{ tags?: Record<string, string> }> = json.elements || [];
 
       for (const el of elements) {
@@ -98,6 +124,7 @@ export async function getOsmLanduse(lat: number, lon: number): Promise<OsmLandus
     return category;
   } catch (err) {
     // Network hiccup or Overpass rate-limit - don't cache failures, just fall back.
+    overpassDownUntil = Date.now() + 60 * 1000;
     return 'unknown';
   }
 }

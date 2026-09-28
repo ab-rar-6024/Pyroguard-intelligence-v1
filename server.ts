@@ -23,6 +23,7 @@ import {
   fetchPersistentThermalSources
 } from './src/utils/supabaseService';
 import { analyzeBurnScar } from './src/utils/burnScarService';
+import { CASE_STUDIES, getCaseStudy } from './src/utils/caseStudyService';
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -334,6 +335,27 @@ app.get('/api/sentinel/burn-scar', async (req: Request, res: Response) => {
     res.json({ success: true, data: result });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Burn-scar analysis failed' });
+  }
+});
+
+// GET /api/case-studies - Documented real incidents that can be replayed from NASA's archive.
+app.get('/api/case-studies', (req: Request, res: Response) => {
+  res.json({ success: true, total: CASE_STUDIES.length, data: CASE_STUDIES });
+});
+
+// GET /api/case-studies/:id - Fetches the archived NASA FIRMS detections for that event and
+// runs them through the live classification pipeline (see caseStudyService.ts).
+app.get('/api/case-studies/:id', async (req: Request, res: Response) => {
+  try {
+    const timeoutMs = 50000;
+    const result = await Promise.race([
+      getCaseStudy(req.params.id),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Case study timed out')), timeoutMs)),
+    ]);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.message === 'Unknown case study' ? 404 : 502;
+    res.status(status).json({ success: false, error: err.message || 'Case study failed' });
   }
 });
 
