@@ -184,7 +184,7 @@ export const SentinelImageryModal: React.FC<SentinelImageryModalProps> = ({ anom
 
         <div className="flex-1 overflow-y-auto scrollbar-glass p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
           {/* Detection picker */}
-          <div className="lg:col-span-3 space-y-1.5">
+          <div className="lg:col-span-3 space-y-1.5 max-h-44 lg:max-h-none overflow-y-auto lg:overflow-visible">
             <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Highest-threat detections</div>
             {candidates.length === 0 && <div className="text-slate-500">No detections near facilities yet.</div>}
             {candidates.map((a) => {

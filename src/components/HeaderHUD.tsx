@@ -263,7 +263,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap sm:flex-shrink-0 w-full sm:w-auto">
             {/* Light / Dark Theme Button (shows the mode you'll switch to) */}
             <button
               type="button"

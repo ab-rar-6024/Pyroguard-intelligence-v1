@@ -31,161 +31,27 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 app.use(express.json({ limit: '10mb' }));
 
 // In-memory store for real-time alerts and satellite anomalies
-let activeAlerts: EmergencyAlert[] = [
-  {
-    id: 'alt-init-01',
-    timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    facilityId: 'fac-na-01',
-    facilityName: 'Baytown Petrochemical Complex (ExxonMobil)',
-    anomalyId: 'th-na-live-01',
-    severity: 'CRITICAL',
-    title: 'CRITICAL HAZARD BREACH: Thermal Anomaly 1.4km from Crude Storage',
-    message: 'VIIRS satellite detected 182 MW thermal signature in immediate blast radius (3.5km). Downwind vector poses direct ignition threat to cryogenic storage tanks.',
-    distanceKm: 1.4,
-    frpMW: 182.4,
-    dispatchedTo: ['Harris County Hazmat Unit 4', 'ExxonMobil Foam Brigade', 'Port Authority Marine Patrol'],
-    status: 'DISPATCHED',
-    evacuationPerimeterKm: 4.5,
-    apparatusAssigned: ['2x Industrial Foam Tenders', 'Hazmat Command Unit', 'Aerial Thermal Drone']
-  },
-  {
-    id: 'alt-init-02',
-    timestamp: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
-    facilityId: 'fac-ap-02',
-    facilityName: 'Jamnagar Refinery & Petrochemical Complex (Reliance)',
-    anomalyId: 'th-ap-live-02',
-    severity: 'HIGH',
-    title: 'HIGH PROXIMITY ALERT: Agricultural Fire within 4.1km of Tank Farm',
-    message: 'MODIS-Aqua detected 88 MW thermal front advancing east at 18 km/h wind speed. 5km buffer precautionary cooling line activated.',
-    distanceKm: 4.1,
-    frpMW: 88.0,
-    dispatchedTo: ['Gujarat SDRF Jamnagar Wing', 'On-Site Deluge Response'],
-    status: 'ACKNOWLEDGED',
-    evacuationPerimeterKm: 5.0,
-    apparatusAssigned: ['Perimeter Deluge Monitors', 'Type 1 Water Cannon']
-  }
-];
+let activeAlerts: EmergencyAlert[] = [];
 
 // In-memory cache
 let cachedAnomalies: ThermalAnomaly[] = [];
 
-// Fallback generator for realistic baseline anomalies
-function generateBaselineHotspots(): ThermalAnomaly[] {
-  const hotspots: ThermalAnomaly[] = [];
-  const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10);
-  const timeStr = now.toTimeString().slice(0, 5).replace(':', '') + 'Z';
-
-  GLOBAL_INDUSTRIAL_FACILITIES.forEach((facility, idx) => {
-    const distOffsets = [
-      { offsetLat: (Math.random() - 0.5) * 0.04, offsetLon: (Math.random() - 0.5) * 0.04, baseFrp: 120 + Math.random() * 200, conf: 'critical' as const },
-      { offsetLat: (Math.random() - 0.4) * 0.12, offsetLon: (Math.random() - 0.4) * 0.12, baseFrp: 35 + Math.random() * 90, conf: 'high' as const },
-    ];
-
-    distOffsets.forEach((off, subIdx) => {
-      const lat = Number((facility.latitude + off.offsetLat).toFixed(5));
-      const lon = Number((facility.longitude + off.offsetLon).toFixed(5));
-      const distance = calculateDistanceKm(lat, lon, facility.latitude, facility.longitude);
-      const windSpeed = Math.round(8 + Math.random() * 32);
-      const windDir = Math.round(Math.random() * 360);
-
-      const windEval = evaluateWindRisk(lat, lon, facility.latitude, facility.longitude, windDir, windSpeed);
-      const threat = calculateThreatScore(distance, off.baseFrp, facility, windEval.riskType, windSpeed);
-
-      const satellites: ('VIIRS-SNPP' | 'VIIRS-NOAA20' | 'VIIRS-NOAA21' | 'MODIS-Terra' | 'MODIS-Aqua')[] = [
-        'VIIRS-SNPP', 'VIIRS-NOAA20', 'VIIRS-NOAA21', 'MODIS-Terra', 'MODIS-Aqua'
-      ];
-
-      hotspots.push({
-        id: `FIRMS-${facility.id}-${subIdx + 1}-${Math.floor(Math.random() * 9000 + 1000)}`,
-        latitude: lat,
-        longitude: lon,
-        brightness: Number((315 + Math.random() * 110).toFixed(1)),
-        bright_t31: Number((295 + Math.random() * 25).toFixed(1)),
-        frp: Number(off.baseFrp.toFixed(1)),
-        scan: 1.1,
-        track: 1.0,
-        acq_date: dateStr,
-        acq_time: timeStr,
-        satellite: satellites[(idx + subIdx) % satellites.length],
-        confidence: off.conf,
-        daynight: Math.random() > 0.4 ? 'D' : 'N',
-        windSpeedKmh: windSpeed,
-        windDirectionDeg: windDir,
-        nearestFacility: {
-          facility,
-          distanceKm: distance,
-          threatScore: threat.score,
-          threatLevel: threat.severity,
-          timeToImpactHours: threat.timeToImpactHours,
-          windSpreadRisk: windEval.riskType
-        }
-      });
-    });
-  });
-
-  const ambientHotspots = [
-    { lat: 53.5461, lon: -113.4938, name: 'Alberta Boreal Firefront', frp: 140 },
-    { lat: 38.8951, lon: -122.5364, name: 'Northern California Complex', frp: 210 },
-    { lat: -12.9714, lon: -55.9876, name: 'Mato Grosso Cerrado Fire', frp: 165 },
-    { lat: -33.8688, lon: 150.2093, name: 'Blue Mountains Bushfire', frp: 195 },
-    { lat: 37.9838, lon: 23.7275, name: 'Attica Regional Wildfire', frp: 85 },
-    { lat: 62.0397, lon: 129.7422, name: 'Yakutia Taiga Anomaly', frp: 310 },
-    { lat: 43.6532, lon: -116.2035, name: 'Boise National Forest Scrub Fire', frp: 75 },
-    { lat: 21.1702, lon: 72.8311, name: 'Surat Coastal Scrub Hotspot', frp: 55 }
-  ];
-
-  ambientHotspots.forEach((amb, i) => {
-    let closestFac = GLOBAL_INDUSTRIAL_FACILITIES[0];
-    let minD = 999999;
-    GLOBAL_INDUSTRIAL_FACILITIES.forEach(f => {
-      const d = calculateDistanceKm(amb.lat, amb.lon, f.latitude, f.longitude);
-      if (d < minD) {
-        minD = d;
-        closestFac = f;
-      }
-    });
-
-    const windSpeed = 15;
-    const windDir = 180;
-    const windEval = evaluateWindRisk(amb.lat, amb.lon, closestFac.latitude, closestFac.longitude, windDir, windSpeed);
-    const threat = calculateThreatScore(minD, amb.frp, closestFac, windEval.riskType, windSpeed);
-
-    hotspots.push({
-      id: `FIRMS-AMB-${i + 1}-${Math.floor(Math.random() * 9000 + 1000)}`,
-      latitude: amb.lat,
-      longitude: amb.lon,
-      brightness: 330.4,
-      bright_t31: 298.2,
-      frp: amb.frp,
-      scan: 1.2,
-      track: 1.0,
-      acq_date: dateStr,
-      acq_time: timeStr,
-      satellite: 'VIIRS-NOAA20',
-      confidence: 'high',
-      daynight: 'D',
-      windSpeedKmh: windSpeed,
-      windDirectionDeg: windDir,
-      nearestFacility: {
-        facility: closestFac,
-        distanceKm: minD,
-        threatScore: threat.score,
-        threatLevel: threat.severity,
-        timeToImpactHours: threat.timeToImpactHours,
-        windSpreadRisk: windEval.riskType
-      }
-    });
-  });
-
-  return hotspots;
-}
-
-// Initial baseline
-cachedAnomalies = generateBaselineHotspots();
+// Only real NASA FIRMS detections are ever served - no seeded or simulated hotspots.
 
 // Live NASA FIRMS Ingest Trigger
+// Never let scans stack: a slow 2-day FIRMS download can outlast the 15s cadence.
+let refreshInFlight = false;
 async function refreshNASAData() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    await runRefreshNASAData();
+  } finally {
+    refreshInFlight = false;
+  }
+}
+
+async function runRefreshNASAData() {
   console.log('[NASA FIRMS] Initiating live satellite telemetry scan...');
   const result = await fetchLiveFIRMSHotspots();
   if (result.anomalies && result.anomalies.length > 0) {
@@ -234,7 +100,8 @@ if (!process.env.VERCEL) {
       console.error('[NASA FIRMS] Historical backfill failed:', err.message);
     }
   }
-  backfillHistoricalData();
+  // Delayed so the big 5-day download doesn't compete with the first live scan for bandwidth.
+  setTimeout(backfillHistoricalData, 60 * 1000);
 }
 
 // ================= API ROUTES =================

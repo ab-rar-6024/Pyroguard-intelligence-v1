@@ -142,6 +142,20 @@ function parseFIRMSCSV(csvText: string, defaultSatellite: 'VIIRS-SNPP' | 'VIIRS-
   return records;
 }
 
+// True when a FIRMS acquisition (UTC date "YYYY-MM-DD" + time "HHMM") happened within the
+// last `hours`. Keeps the live view to genuinely recent satellite passes.
+function isWithinLastHours(acqDate: string, acqTime: string, hours: number): boolean {
+  const [y, m, d] = acqDate.split('-').map(Number);
+  // The parser stores times as "09:58Z" - keep only the digits.
+  const t = String(acqTime).replace(/\D/g, '').padStart(4, '0');
+  const hh = Number(t.slice(0, 2));
+  const mm = Number(t.slice(2, 4));
+  const acquiredAt = Date.UTC(y, m - 1, d, hh, mm);
+  if (!Number.isFinite(acquiredAt)) return false;
+  const ageMs = Date.now() - acquiredAt;
+  return ageMs <= hours * 60 * 60 * 1000 && ageMs >= -60 * 60 * 1000;
+}
+
 // Fetch live NASA FIRMS feeds and compute industrial proximity threat scores
 export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnomaly[]; alerts: EmergencyAlert[] }> {
   if (!currentMapKey || currentMapKey.length < 10) {
@@ -155,17 +169,19 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
   try {
     const fetchPromises = GLOBAL_BBOX_REGIONS.map(async (region) => {
       try {
-        const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/1`;
+        // day_range=2 (yesterday + today, UTC): with 1, the feed is empty for the first hours
+        // after 00:00 UTC before any satellite has passed. Trimmed to the last 24h below.
+        const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${currentMapKey}/${region.instrument}/${region.bbox}/2`;
         const res = await fetch(url, {
           headers: { 'User-Agent': 'PyroGuard-Industrial-Fire-Monitor/2.0' },
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(45000) // 2-day regional CSVs are large
         });
 
         if (res.ok) {
           const csvText = await res.text();
           if (csvText && !csvText.includes('Invalid API call')) {
             const defaultSat = region.instrument.includes('NOAA20') ? 'VIIRS-NOAA20' : 'VIIRS-SNPP';
-            const parsed = parseFIRMSCSV(csvText, defaultSat);
+            const parsed = parseFIRMSCSV(csvText, defaultSat).filter((d) => isWithinLastHours(d.acq_date, d.acq_time, 24));
             rawDetections.push(...parsed);
             successfulRegions.push(region.name);
           }

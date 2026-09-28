@@ -25,7 +25,7 @@ import {
   AppTheme
 } from './types';
 import { GLOBAL_INDUSTRIAL_FACILITIES } from './data/industrialDatabase';
-import { generateClientBaselineHotspots, DEFAULT_ACTIVE_ALERTS } from './utils/baselineData';
+// (demo baseline data intentionally not imported - only real NASA FIRMS data is shown)
 
 // PS 26162 scope: a thermal detection counts as "industrial" when it falls within this
 // radius of a known industrial facility. Used by the Industrial/All Fires navbar toggle.
@@ -47,10 +47,10 @@ export default function App() {
     });
   }, []);
 
-  // State with instant rich baseline defaults (zero-latency, never empty)
-  const [anomalies, setAnomalies] = useState<ThermalAnomaly[]>(() => generateClientBaselineHotspots());
+  // Only real NASA FIRMS detections are ever shown: start empty, fill from /api/thermal/live.
+  const [anomalies, setAnomalies] = useState<ThermalAnomaly[]>([]);
   const [facilities, setFacilities] = useState<IndustrialFacility[]>(() => GLOBAL_INDUSTRIAL_FACILITIES);
-  const [alerts, setAlerts] = useState<EmergencyAlert[]>(() => DEFAULT_ACTIVE_ALERTS);
+  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
   const [firmsStatus, setFirmsStatus] = useState<FIRMSFeedStatus | null>(null);
   const [isRefreshingSatellites, setIsRefreshingSatellites] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -190,7 +190,7 @@ export default function App() {
       if (thermalRes && thermalRes.ok) {
         try {
           const thermalData = await thermalRes.json();
-          if (thermalData && thermalData.success && Array.isArray(thermalData.data) && thermalData.data.length > 0) {
+          if (thermalData && thermalData.success && Array.isArray(thermalData.data)) {
             setAnomalies(thermalData.data);
             if (thermalData.firmsStatus) {
               setFirmsStatus(thermalData.firmsStatus);

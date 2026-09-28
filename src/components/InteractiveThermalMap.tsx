@@ -526,18 +526,18 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
   const inspectedFacility = selectedFacility || selectedAnomaly?.nearestFacility?.facility || null;
 
   return (
-    <div className="isolate relative w-full h-[400px] sm:h-[460px] md:h-[490px] xl:h-[calc(100vh-145px)] xl:min-h-[630px] xl:max-h-[800px] bg-black rounded-2xl overflow-hidden border border-orange-500/25 shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex flex-col z-0">
+    <div className="isolate relative w-full h-[min(70vh,520px)] sm:h-[460px] md:h-[490px] xl:h-[calc(100vh-145px)] xl:min-h-[630px] xl:max-h-[800px] bg-black rounded-2xl overflow-hidden border border-orange-500/25 shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex flex-col z-0">
 
       {/* Top Map Control Overlay */}
       <div
         onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
-        className="absolute top-2.5 sm:top-3 left-2.5 sm:left-3 z-30 flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100%-1.5rem)] sm:max-w-[90%]"
+        className="absolute top-2.5 sm:top-3 left-2.5 sm:left-3 right-2.5 sm:right-auto z-30 flex flex-wrap items-center gap-1.5 sm:gap-2 sm:max-w-[90%] pointer-events-none [&>*]:pointer-events-auto"
       >
 
-        {/* Dropdown Location Navigation Button */}
-        <div className="relative flex-shrink-0">
+        {/* Dropdown Location Navigation Button (static on phones so its panel anchors to the full-width bar) */}
+        <div className="sm:relative flex-shrink-0">
           <button
             type="button"
             onClick={(e) => {
@@ -556,7 +556,7 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
             <div
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
-              className="absolute left-0 mt-2 w-60 max-w-[90vw] bg-black/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.9)] z-40 text-xs font-mono animate-in fade-in slide-in-from-top-2 duration-150"
+              className="absolute left-0 right-0 sm:right-auto mt-2 sm:w-60 max-h-[55vh] overflow-y-auto bg-black/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.9)] z-40 text-xs font-mono animate-in fade-in slide-in-from-top-2 duration-150"
             >
               <div className="flex items-center justify-between pb-2 mb-1.5 border-b border-white/10 px-1 text-[10px] text-orange-400 font-bold uppercase tracking-wider">
                 <span className="flex items-center gap-1.5">
@@ -639,7 +639,7 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
         </div>
 
         {/* GIS Layer Switcher Dropdown */}
-        <div className="relative flex-shrink-0">
+        <div className="sm:relative flex-shrink-0">
           <button
             onClick={() => setShowLayerMenu(!showLayerMenu)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-black/75 backdrop-blur-xl hover:bg-black/90 border border-orange-500/20 hover:border-orange-500/50 rounded-xl text-[11px] sm:text-xs font-mono text-slate-300 hover:text-orange-300 shadow-xl transition-all cursor-pointer hover:shadow-[0_0_15px_rgba(249,115,22,0.2)]"
@@ -649,7 +649,7 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
           </button>
 
           {showLayerMenu && (
-            <div className="absolute left-0 mt-2 w-64 max-w-[90vw] bg-black/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-3.5 shadow-[0_12px_40px_rgba(0,0,0,0.9)] z-40 text-xs font-mono">
+            <div className="absolute left-0 right-0 sm:right-auto mt-2 sm:w-64 max-h-[60vh] overflow-y-auto bg-black/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-3.5 shadow-[0_12px_40px_rgba(0,0,0,0.9)] z-40 text-xs font-mono">
               <div className="text-[10px] text-orange-400 font-bold uppercase tracking-wider mb-2">
                 Base Map Layer
               </div>
