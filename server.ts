@@ -24,6 +24,7 @@ import {
 } from './src/utils/supabaseService';
 import { analyzeBurnScar } from './src/utils/burnScarService';
 import { CASE_STUDIES, getCaseStudy } from './src/utils/caseStudyService';
+import { prefetchWind, getWind, getWindStatus } from './src/utils/windService';
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -120,7 +121,8 @@ app.get('/api/health', async (req: Request, res: Response) => {
     activeAlerts: activeAlerts.length,
     firmsStatus,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-    supabaseConfigured: isSupabaseConfigured()
+    supabaseConfigured: isSupabaseConfigured(),
+    wind: getWindStatus()
   });
 });
 
@@ -357,6 +359,31 @@ app.get('/api/case-studies/:id', async (req: Request, res: Response) => {
     const status = err.message === 'Unknown case study' ? 404 : 502;
     res.status(status).json({ success: false, error: err.message || 'Case study failed' });
   }
+});
+
+// GET /api/wind?lat=..&lon=.. - Real wind for any point (Open-Meteo). Standalone: it is not part of
+// the fire pipeline, which uses the same cached service internally.
+app.get('/api/wind', async (req: Request, res: Response) => {
+  const lat = Number(req.query.lat);
+  const lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return res.status(400).json({ success: false, error: 'lat (-90..90) and lon (-180..180) are required numbers.' });
+  }
+  await prefetchWind([{ lat, lon }]);
+  const wind = getWind(lat, lon);
+  if (!wind) {
+    return res.status(502).json({ success: false, error: 'Wind data is currently unavailable.' });
+  }
+  res.json({
+    success: true,
+    data: {
+      speedKmh: Number(wind.speedKmh.toFixed(1)),
+      directionFromDeg: Math.round(wind.directionDeg),
+      gustKmh: wind.gustKmh,
+      asOf: new Date(wind.fetchedAt).toISOString(),
+    },
+    attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)',
+  });
 });
 
 // GET /api/facilities - Return world industrial facilities database

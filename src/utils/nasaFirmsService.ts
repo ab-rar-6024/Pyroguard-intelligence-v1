@@ -1,6 +1,7 @@
 import { GLOBAL_INDUSTRIAL_FACILITIES } from '../data/industrialDatabase';
 import { calculateDistanceKm, evaluateWindRisk, calculateThreatScore } from './gisCalculations';
 import { ThermalAnomaly, IndustrialFacility, EmergencyAlert, FIRMSFeedStatus } from '../types';
+import { prefetchWind, getWind } from './windService';
 
 let currentMapKey = process.env.NASA_FIRMS_MAP_KEY || '4ddefd0f9c4e2cf87148595c54a19642';
 
@@ -186,6 +187,7 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
 
   const rawDetections: RawFIRMSData[] = [];
   const successfulRegions: string[] = [];
+  const cycleStartedAt = Date.now();
 
   try {
     const fetchPromises = GLOBAL_BBOX_REGIONS.map(async (region) => {
@@ -222,6 +224,7 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
     });
 
     await Promise.all(fetchPromises);
+    const downloadMs = Date.now() - cycleStartedAt;
 
     if (rawDetections.length === 0) {
       console.log('NASA FIRMS API returned 0 records or reached rate limit. Retaining current telemetry.');
@@ -231,12 +234,8 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
 
     console.log(`NASA FIRMS: Ingested ${rawDetections.length} raw real satellite thermal detections across ${successfulRegions.length} global regions.`);
 
-    // Spatial matching against all industrial facilities
-    const processedHotspots: ThermalAnomaly[] = [];
-    const generatedAlerts: EmergencyAlert[] = [];
-
-    // For each raw detection, find the closest industrial facility
-    rawDetections.forEach((raw, idx) => {
+    // Stage 1 - nearest industrial facility for every raw detection (cheap; needs no weather data).
+    const candidates = rawDetections.map((raw, idx) => {
       let closestFac = GLOBAL_INDUSTRIAL_FACILITIES[0];
       let minDistance = 999999;
 
@@ -248,9 +247,47 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
         }
       });
 
-      // Realistic meteorological wind simulation based on regional latitude
-      const windSpeed = Math.round(10 + Math.abs(Math.sin(raw.latitude * 0.1)) * 30);
-      const windDir = Math.round((Math.abs(raw.longitude * 3.7) + 120) % 360);
+      return { raw, idx, closestFac, minDistance };
+    });
+
+    // Stage 2 - choose what to show. This depends only on distance and power, not on wind.
+    // Prioritize detections closest to industrial facilities (< 60km) and highest FRP, plus a spread of
+    // representative fires (up to 300 total for a responsive UI).
+    const closeHazards = candidates.filter(c => c.minDistance < 60).sort((a, b) => a.minDistance - b.minDistance);
+    const highPowerHotspots = candidates.filter(c => c.raw.frp >= 25 && c.minDistance >= 60).sort((a, b) => b.raw.frp - a.raw.frp);
+    // Stable pseudo-random order: the same detection always ranks the same, so this spread of
+    // representative fires does not reshuffle every cycle (which would also force fresh weather
+    // lookups every time and burn through the free weather quota).
+    const stableOrder = (lat: number, lon: number) => {
+      const x = Math.sin(lat * 12.9898 + lon * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const generalHotspots = candidates
+      .filter(c => c.raw.frp < 25 && c.minDistance >= 60)
+      .sort((a, b) => stableOrder(a.raw.latitude, a.raw.longitude) - stableOrder(b.raw.latitude, b.raw.longitude));
+
+    const selected = [
+      ...closeHazards.slice(0, 120),
+      ...highPowerHotspots.slice(0, 100),
+      ...generalHotspots.slice(0, 80)
+    ];
+
+    // Stage 3 - REAL wind (Open-Meteo) only for the detections that are actually shown. Cached per
+    // ~28 km cell for an hour, so most 15 s cycles make no weather call at all.
+    const windStartedAt = Date.now();
+    await prefetchWind(selected.map(c => ({ lat: c.raw.latitude, lon: c.raw.longitude })));
+    const windMs = Date.now() - windStartedAt;
+
+    // Stage 4 - wind risk, threat score, anomaly and dispatch alerts for the selected detections.
+    const curatedHotspots: ThermalAnomaly[] = [];
+    const generatedAlerts: EmergencyAlert[] = [];
+
+    selected.forEach(({ raw, idx, closestFac, minDistance }) => {
+      const wind = getWind(raw.latitude, raw.longitude);
+      // No real wind -> speed/direction 0 (neutral STAGNANT risk) and windSource 'unavailable'.
+      // A wind value is never invented.
+      const windSpeed = wind ? Math.round(wind.speedKmh) : 0;
+      const windDir = wind ? Math.round(wind.directionDeg) : 0;
 
       const windEval = evaluateWindRisk(raw.latitude, raw.longitude, closestFac.latitude, closestFac.longitude, windDir, windSpeed);
       const threat = calculateThreatScore(minDistance, raw.frp, closestFac, windEval.riskType, windSpeed);
@@ -273,6 +310,7 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
         daynight: raw.daynight,
         windSpeedKmh: windSpeed,
         windDirectionDeg: windDir,
+        windSource: wind ? 'open-meteo' : 'unavailable',
         nearestFacility: {
           facility: closestFac,
           distanceKm: Number(minDistance.toFixed(2)),
@@ -283,11 +321,18 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
         }
       };
 
-      processedHotspots.push(anomaly);
+      curatedHotspots.push(anomaly);
 
       // Auto-trigger CAD emergency dispatch if within high danger zone.
       // Gated on FRP so sub-5MW sensor noise near a facility doesn't spam dispatches.
       if (raw.frp >= 5 && (minDistance <= closestFac.blastRadiusKm * 1.5 || (threat.severity === 'CRITICAL' && minDistance <= 15.0))) {
+        const chemicals = closestFac.primaryChemicals.slice(0, 2).join(', ');
+        const windSentence = wind
+          ? (windEval.riskType === 'DIRECT'
+              ? ` Wind (${windSpeed} km/h from ${windDir}°) is blowing toward the facility, presenting an ignition vector to ${chemicals}.`
+              : ` Wind (${windSpeed} km/h from ${windDir}°) is not blowing directly toward the facility (${windEval.riskType.toLowerCase()}); it stores ${chemicals}.`)
+          : ` Wind data was unavailable; the facility stores ${chemicals}.`;
+
         generatedAlerts.push({
           id: `CAD-${Date.now()}-${idx}`,
           timestamp: new Date().toISOString(),
@@ -296,7 +341,7 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
           anomalyId: anomaly.id,
           severity: threat.severity,
           title: `CRITICAL NASA SATELLITE BREACH: ${raw.satellite} detected ${raw.frp.toFixed(1)} MW firefront`,
-          message: `Live satellite telemetry placed a ${raw.frp.toFixed(1)} MW thermal hotspot only ${minDistance.toFixed(1)} km from ${closestFac.name}. Wind vector (${windSpeed} km/h from ${windDir}°) presents an immediate ignition vector to ${closestFac.primaryChemicals.slice(0, 2).join(', ')}.`,
+          message: `Live satellite telemetry placed a ${raw.frp.toFixed(1)} MW thermal hotspot only ${minDistance.toFixed(1)} km from ${closestFac.name}.${windSentence}`,
           distanceKm: Number(minDistance.toFixed(1)),
           frpMW: Number(raw.frp.toFixed(1)),
           dispatchedTo: [
@@ -315,22 +360,7 @@ export async function fetchLiveFIRMSHotspots(): Promise<{ anomalies: ThermalAnom
       }
     });
 
-    // Intelligent Prioritization & Sampling:
-    // Sort anomalies: prioritize ones closest to industrial facilities (< 50km) and highest FRP
-    const closeHazards = processedHotspots.filter(a => (a.nearestFacility?.distanceKm || 999) < 60);
-    const highPowerHotspots = processedHotspots.filter(a => a.frp >= 25 && (a.nearestFacility?.distanceKm || 999) >= 60);
-    const generalHotspots = processedHotspots.filter(a => a.frp < 25 && (a.nearestFacility?.distanceKm || 999) >= 60);
-
-    // Keep top close hazards + top high-power fires + distributed representative fires (up to 300 total for responsive UI)
-    closeHazards.sort((a, b) => (a.nearestFacility?.distanceKm || 999) - (b.nearestFacility?.distanceKm || 999));
-    highPowerHotspots.sort((a, b) => b.frp - a.frp);
-
-    const curatedHotspots = [
-      ...closeHazards.slice(0, 120),
-      ...highPowerHotspots.slice(0, 100),
-      ...generalHotspots.slice(0, 80)
-    ];
-
+    console.log(`[NASA FIRMS] cycle timing: download ${downloadMs} ms, wind ${windMs} ms, total ${Date.now() - cycleStartedAt} ms`);
     cachedRealAnomalies = curatedHotspots;
     isUsingRealData = true;
     lastSyncTimestamp = new Date().toISOString();
@@ -406,8 +436,10 @@ export async function fetchHistoricalFIRMSBackfill(dayRange: number = 5): Promis
 
     if (minDistance > 60) return; // only industrially-relevant history matters here
 
-    const windSpeed = Math.round(10 + Math.abs(Math.sin(raw.latitude * 0.1)) * 30);
-    const windDir = Math.round((Math.abs(raw.longitude * 3.7) + 120) % 360);
+    // Historical detections: the wind at that past moment is not available from the live weather
+    // feed, and today's wind would be wrong for them - so none is recorded (never an invented value).
+    const windSpeed = 0;
+    const windDir = 0;
     const windEval = evaluateWindRisk(raw.latitude, raw.longitude, closestFac.latitude, closestFac.longitude, windDir, windSpeed);
     const threat = calculateThreatScore(minDistance, raw.frp, closestFac, windEval.riskType, windSpeed);
 
@@ -427,6 +459,7 @@ export async function fetchHistoricalFIRMSBackfill(dayRange: number = 5): Promis
       daynight: raw.daynight,
       windSpeedKmh: windSpeed,
       windDirectionDeg: windDir,
+      windSource: 'unavailable',
       nearestFacility: {
         facility: closestFac,
         distanceKm: Number(minDistance.toFixed(2)),

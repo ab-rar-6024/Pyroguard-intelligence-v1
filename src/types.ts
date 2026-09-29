@@ -52,6 +52,8 @@ export interface ThermalAnomaly {
   daynight: 'D' | 'N';
   windSpeedKmh: number;
   windDirectionDeg: number;
+  /** 'open-meteo' = measured/forecast wind for this spot; 'unavailable' = no real wind (speed/direction are 0 and must not be shown as real). */
+  windSource?: 'open-meteo' | 'unavailable';
   nearestFacility?: {
     facility: IndustrialFacility;
     distanceKm: number;

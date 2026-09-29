@@ -318,7 +318,9 @@ export const ThreatMatrixWidget: React.FC<ThreatMatrixWidgetProps> = ({
                             : 'text-sky-400'
                         }`}
                       >
-                        {threat.windSpreadRisk} ({item.windSpeedKmh}km/h)
+                        {item.windSource === 'unavailable'
+                          ? 'Wind n/a'
+                          : `${threat.windSpreadRisk} (${item.windSpeedKmh}km/h)`}
                       </div>
                     </div>
                   </div>

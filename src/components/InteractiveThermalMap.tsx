@@ -461,7 +461,7 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
         markersLayerRef.current?.addLayer(fireMarker);
 
         // 3. Render Wind Vectors & Spread Projections
-        if (gisConfig.showWindVectors && a.nearestFacility) {
+        if (gisConfig.showWindVectors && a.nearestFacility && a.windSource !== 'unavailable') {
           // Calculate wind arrow vector point
           const windRad = ((a.windDirectionDeg - 90) * Math.PI) / 180;
           const vectorDistKm = 6.0;
@@ -866,7 +866,11 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
                 </div>
                 <div className="bg-slate-950/70 p-1.5 rounded border border-slate-800">
                   <div className="text-[9px] text-slate-400 uppercase">Wind Vector</div>
-                  <div className="font-bold text-sky-400 text-xs">{inspectedAnomaly.windSpeedKmh} km/h</div>
+                  <div className="font-bold text-sky-400 text-xs">
+                    {inspectedAnomaly.windSource === 'unavailable'
+                      ? 'n/a'
+                      : `${inspectedAnomaly.windSpeedKmh} km/h from ${inspectedAnomaly.windDirectionDeg}°`}
+                  </div>
                 </div>
               </div>
 
@@ -953,6 +957,12 @@ export const InteractiveThermalMap: React.FC<InteractiveThermalMapProps> = ({
         <div className="flex items-center gap-1.5">
           <span className="w-3.5 h-0.5 bg-sky-400 border-dashed"></span>
           <span>Wind Propagation</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+          <span>Wind: </span>
+          <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-orange-400">
+            Open-Meteo.com
+          </a>
         </div>
       </div>
 
